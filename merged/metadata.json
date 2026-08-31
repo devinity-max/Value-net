@@ -1,0 +1,6 @@
+{
+  "name": "VALUE.NET — Blox Fruits Trading Calculator",
+  "description": "A high-precision luxury trading terminal for Blox Fruits with fair formula analysis, real-time value verdicts, live peer-to-peer trade marketplace, temporary negotiation chat rooms, asset browser, and trade ledger.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
