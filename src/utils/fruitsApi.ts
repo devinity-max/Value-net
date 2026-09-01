@@ -255,3 +255,185 @@ export async function updateCatalogSettings(changes: Record<string, any>): Promi
   }
 }
 
+export async function updateFruitImage(fruitId: string, imageUrl: string): Promise<Fruit> {
+  const token = getAuthToken();
+  const res = await safeFetchJson<{ success: boolean; fruit: Fruit; error?: string }>(
+    `/api/admin/fruits/${fruitId}/image`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ imageUrl }),
+    }
+  );
+
+  if (!res.success || !res.data?.success || !res.data.fruit) {
+    throw new Error(res.data?.error || res.error || 'Failed to update fruit artwork.');
+  }
+
+  cache = cache.map((f) => (f.id === fruitId ? res.data!.fruit : f));
+  notifyListeners();
+  return res.data.fruit;
+}
+
+export async function batchMatchAssets(overwrite = false): Promise<{ success: boolean; fruits: Fruit[]; matchedCount: number }> {
+  const token = getAuthToken();
+  const res = await safeFetchJson<{ success: boolean; fruits: Fruit[]; matchedCount: number; error?: string }>(
+    '/api/admin/fruits/batch-match-assets',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ overwrite }),
+    }
+  );
+
+  if (!res.success || !res.data?.success || !res.data.fruits) {
+    throw new Error(res.data?.error || res.error || 'Failed to batch match assets.');
+  }
+
+  cache = res.data.fruits;
+  notifyListeners();
+  return {
+    success: true,
+    fruits: res.data.fruits,
+    matchedCount: res.data.matchedCount || 0,
+  };
+}
+
+export interface DiskAssetItem {
+  filename: string;
+  name: string;
+  path: string;
+  category: 'Fruit' | 'Variant' | 'Gamepass' | 'Upload';
+  size: number;
+  matchedFruitId?: string;
+}
+
+export async function fetchDiskAssets(): Promise<{
+  success: boolean;
+  assets: DiskAssetItem[];
+  totalCount: number;
+  fruitsCount: number;
+  variantsCount: number;
+  gamepassesCount: number;
+}> {
+  const token = getAuthToken();
+  const res = await safeFetchJson<{
+    success: boolean;
+    assets: DiskAssetItem[];
+    totalCount: number;
+    fruitsCount: number;
+    variantsCount: number;
+    gamepassesCount: number;
+    error?: string;
+  }>('/api/admin/assets', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!res.success || !res.data?.success) {
+    return {
+      success: false,
+      assets: [],
+      totalCount: 0,
+      fruitsCount: 0,
+      variantsCount: 0,
+      gamepassesCount: 0,
+    };
+  }
+
+  return res.data;
+}
+
+export async function uploadAssetsZip(file: File): Promise<{
+  success: boolean;
+  message: string;
+  matchedCount: number;
+  assetsCount: number;
+  assets: DiskAssetItem[];
+  fruits: Fruit[];
+}> {
+  const token = getAuthToken();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result as string;
+        const res = await safeFetchJson<any>('/api/admin/assets/upload-zip', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            zipBase64: base64,
+            filename: file.name,
+          }),
+        });
+
+        if (!res.success || !res.data?.success) {
+          throw new Error(res.data?.error || res.error || 'Failed to extract and process zip file.');
+        }
+
+        if (res.data.fruits) {
+          cache = res.data.fruits;
+          notifyListeners();
+        }
+
+        resolve(res.data);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read zip file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadSingleAsset(
+  file: File,
+  category: 'Fruit' | 'Variant' | 'Gamepass' = 'Fruit'
+): Promise<{ success: boolean; path: string; matchedFruit?: Fruit }> {
+  const token = getAuthToken();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result as string;
+        const res = await safeFetchJson<any>('/api/admin/assets/upload-file', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            fileBase64: base64,
+            filename: file.name,
+            category,
+          }),
+        });
+
+        if (!res.success || !res.data?.success) {
+          throw new Error(res.data?.error || res.error || 'Failed to upload asset file.');
+        }
+
+        if (res.data.matchedFruit) {
+          cache = cache.map((f) => (f.id === res.data.matchedFruit.id ? res.data.matchedFruit : f));
+          notifyListeners();
+        }
+
+        resolve(res.data);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+

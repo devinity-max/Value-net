@@ -3,6 +3,7 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { execSync } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 
@@ -21,6 +22,8 @@ interface Fruit {
   type: string;
   description: string;
   hypeFactor: number;
+  imageUrl?: string;
+  image_url?: string;
   isPermanent?: boolean;
   isArchived?: boolean;
   archivedAt?: number;
@@ -2511,6 +2514,18 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Ensure asset directories exist on disk
+  const ASSETS_FRUITS_DIR = path.join(process.cwd(), 'public/assets/fruits');
+  const ASSETS_VARIANTS_DIR = path.join(process.cwd(), 'public/assets/variants');
+  const ASSETS_GAMEPASSES_DIR = path.join(process.cwd(), 'public/assets/gamepasses');
+  const UPLOADS_DIR = path.join(process.cwd(), 'public/uploads');
+
+  [ASSETS_FRUITS_DIR, ASSETS_VARIANTS_DIR, ASSETS_GAMEPASSES_DIR, UPLOADS_DIR].forEach((dir) => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
+
   // Production Security Headers Middleware
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -2521,7 +2536,12 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // Static Assets Routing for Real Fruit PNGs and Uploads
+  app.use('/assets', express.static(path.join(process.cwd(), 'public/assets')));
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public/uploads')));
 
   // Global Telemetry & Rate Limiting Middleware
   app.use((req, res, next) => {
@@ -6558,6 +6578,8 @@ async function startServer() {
       type = 'Natural',
       description = '',
       hypeFactor = 5,
+      imageUrl,
+      image_url,
       isPermanent = false,
       tradingNotes = '',
       status = 'ACTIVE',
@@ -6597,6 +6619,7 @@ async function startServer() {
       type: ['Beast', 'Elemental', 'Natural', 'Gamepass'].includes(type) ? type : 'Natural',
       description: description ? description.trim() : `High powered ${rarity} class fruit.`,
       hypeFactor: Math.max(1, Math.min(10, Number(hypeFactor) || 5)),
+      imageUrl: (imageUrl || image_url || '').trim() || undefined,
       isPermanent: !!isPermanent,
       isArchived: status === 'ARCHIVED',
       status: status || 'ACTIVE',
@@ -6656,6 +6679,8 @@ async function startServer() {
       type,
       description,
       hypeFactor,
+      imageUrl,
+      image_url,
       isPermanent,
       tradingNotes,
       status,
@@ -6665,6 +6690,13 @@ async function startServer() {
     const diffs: string[] = [];
     const previousSnapshot = { ...fruit };
 
+    if (imageUrl !== undefined || image_url !== undefined) {
+      const newImg = (imageUrl !== undefined ? imageUrl : image_url || '').trim();
+      if (newImg !== (fruit.imageUrl || '')) {
+        diffs.push(`imageUrl updated`);
+        fruit.imageUrl = newImg || undefined;
+      }
+    }
     if (name && typeof name === 'string' && name.trim() && name.trim() !== fruit.name) {
       const duplicate = Array.from(fruitsMap.values()).find(
         (f) => f.id !== fruit.id && f.name.trim().toLowerCase() === name.trim().toLowerCase()
@@ -6985,6 +7017,302 @@ async function startServer() {
       success: true,
       message: `Fruit Catalog successfully restored to default factory baseline (${fruitsMap.size} fruits).`,
       fruits: Array.from(fruitsMap.values()),
+    });
+  });
+
+  // Helper: Normalize asset name for deterministic catalog matching
+  function normalizeAssetKey(input: string): string {
+    if (!input) return '';
+    return input
+      .toLowerCase()
+      .trim()
+      .replace(/\.(png|jpg|jpeg|webp|gif|svg)$/i, '')
+      .replace(/fruit$/i, '') // e.g. dragonfruit -> dragon, kitsunefruit -> kitsune
+      .replace(/\s*\([^)]*\)/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  // Helper: Scan disk for available real PNG/image assets
+  function scanAvailableDiskAssets(): Array<{
+    filename: string;
+    name: string;
+    path: string;
+    category: 'Fruit' | 'Variant' | 'Gamepass' | 'Upload';
+    size: number;
+    matchedFruitId?: string;
+  }> {
+    const assets: Array<{
+      filename: string;
+      name: string;
+      path: string;
+      category: 'Fruit' | 'Variant' | 'Gamepass' | 'Upload';
+      size: number;
+      matchedFruitId?: string;
+    }> = [];
+
+    const dirs: Array<{ dir: string; category: 'Fruit' | 'Variant' | 'Gamepass' | 'Upload'; webPrefix: string }> = [
+      { dir: ASSETS_FRUITS_DIR, category: 'Fruit', webPrefix: '/assets/fruits' },
+      { dir: ASSETS_VARIANTS_DIR, category: 'Variant', webPrefix: '/assets/variants' },
+      { dir: ASSETS_GAMEPASSES_DIR, category: 'Gamepass', webPrefix: '/assets/gamepasses' },
+      { dir: UPLOADS_DIR, category: 'Upload', webPrefix: '/uploads' },
+    ];
+
+    for (const { dir, category, webPrefix } of dirs) {
+      if (fs.existsSync(dir)) {
+        try {
+          const files = fs.readdirSync(dir);
+          for (const file of files) {
+            if (/\.(png|jpg|jpeg|webp)$/i.test(file)) {
+              const fullPath = path.join(dir, file);
+              const stats = fs.statSync(fullPath);
+              const norm = normalizeAssetKey(file);
+              
+              // Find matching fruit in catalog
+              let matchedId: string | undefined;
+              for (const fruit of fruitsMap.values()) {
+                const fn = normalizeAssetKey(fruit.name);
+                const fid = normalizeAssetKey(fruit.id);
+                if (norm === fn || norm === fid || norm.replace(/-/g, '') === fn.replace(/-/g, '')) {
+                  matchedId = fruit.id;
+                  break;
+                }
+              }
+
+              assets.push({
+                filename: file,
+                name: file.replace(/\.[^/.]+$/, ''),
+                path: `${webPrefix}/${file}`,
+                category,
+                size: stats.size,
+                matchedFruitId: matchedId,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn(`Could not read asset dir ${dir}:`, err);
+        }
+      }
+    }
+
+    return assets;
+  }
+
+  // 66b. List All Real Available PNG Assets on Disk
+  app.get('/api/admin/assets', (req, res) => {
+    const authUser = getAuthUserFromRequest(req);
+    if (!authUser || !hasPermission(authUser, 'MANAGE_FRUITS')) {
+      return res.status(403).json({ success: false, error: 'Permission denied: Cannot view assets.' });
+    }
+
+    const assets = scanAvailableDiskAssets();
+    res.json({
+      success: true,
+      assets,
+      totalCount: assets.length,
+      fruitsCount: assets.filter((a) => a.category === 'Fruit').length,
+      variantsCount: assets.filter((a) => a.category === 'Variant').length,
+      gamepassesCount: assets.filter((a) => a.category === 'Gamepass').length,
+    });
+  });
+
+  // 66c. Upload ZIP Archive of PNG Assets and Auto-Extract / Match
+  app.post('/api/admin/assets/upload-zip', (req, res) => {
+    const authUser = getAuthUserFromRequest(req);
+    if (!authUser || !hasPermission(authUser, 'MANAGE_FRUITS')) {
+      return res.status(403).json({ success: false, error: 'Permission denied: Cannot upload assets.' });
+    }
+
+    const { zipBase64, filename } = req.body || {};
+    if (!zipBase64) {
+      return res.status(400).json({ success: false, error: 'Missing zipBase64 payload.' });
+    }
+
+    try {
+      const cleanBase64 = zipBase64.replace(/^data:application\/(zip|x-zip-compressed|octet-stream);base64,/, '');
+      const zipBuffer = Buffer.from(cleanBase64, 'base64');
+      const tempZipPath = path.join('/tmp', `assets_import_${Date.now()}.zip`);
+      fs.writeFileSync(tempZipPath, zipBuffer);
+
+      // Unzip to public/assets/fruits/
+      execSync(`unzip -o -q "${tempZipPath}" -d "${ASSETS_FRUITS_DIR}"`, { timeout: 30000 });
+      try { fs.unlinkSync(tempZipPath); } catch {}
+
+      // Reconcile extracted files
+      const assets = scanAvailableDiskAssets();
+      let matchedCount = 0;
+
+      for (const asset of assets) {
+        if (asset.matchedFruitId && fruitsMap.has(asset.matchedFruitId)) {
+          const fruit = fruitsMap.get(asset.matchedFruitId)!;
+          fruit.imageUrl = asset.path;
+          fruit.updatedAt = Date.now();
+          fruit.updatedBy = authUser.username;
+          matchedCount++;
+        }
+      }
+
+      saveFruitCatalogToDisk();
+      broadcast('CATALOG_ASSETS_MATCHED', { count: fruitsMap.size, matchedCount });
+
+      res.json({
+        success: true,
+        message: `Successfully extracted and processed asset archive. Matched ${matchedCount} fruits.`,
+        matchedCount,
+        assetsCount: assets.length,
+        assets,
+        fruits: Array.from(fruitsMap.values()),
+      });
+    } catch (err: any) {
+      console.error('ZIP extraction error:', err);
+      res.status(500).json({ success: false, error: `Failed to extract ZIP archive: ${err?.message || err}` });
+    }
+  });
+
+  // 66d. Upload Single Real PNG File
+  app.post('/api/admin/assets/upload-file', (req, res) => {
+    const authUser = getAuthUserFromRequest(req);
+    if (!authUser || !hasPermission(authUser, 'MANAGE_FRUITS')) {
+      return res.status(403).json({ success: false, error: 'Permission denied: Cannot upload asset.' });
+    }
+
+    const { fileBase64, filename, category = 'Fruit' } = req.body || {};
+    if (!fileBase64 || !filename) {
+      return res.status(400).json({ success: false, error: 'Missing fileBase64 or filename.' });
+    }
+
+    try {
+      const cleanBase64 = fileBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      const safeFilename = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
+      
+      let targetDir = ASSETS_FRUITS_DIR;
+      let webPrefix = '/assets/fruits';
+      if (category === 'Variant') {
+        targetDir = ASSETS_VARIANTS_DIR;
+        webPrefix = '/assets/variants';
+      } else if (category === 'Gamepass') {
+        targetDir = ASSETS_GAMEPASSES_DIR;
+        webPrefix = '/assets/gamepasses';
+      }
+
+      const destPath = path.join(targetDir, safeFilename);
+      fs.writeFileSync(destPath, buffer);
+
+      const webPath = `${webPrefix}/${safeFilename}`;
+      const norm = normalizeAssetKey(safeFilename);
+
+      // Try matching fruit
+      let matchedFruit: Fruit | undefined;
+      for (const fruit of fruitsMap.values()) {
+        const fn = normalizeAssetKey(fruit.name);
+        const fid = normalizeAssetKey(fruit.id);
+        if (norm === fn || norm === fid || norm.replace(/-/g, '') === fn.replace(/-/g, '')) {
+          fruit.imageUrl = webPath;
+          fruit.updatedAt = Date.now();
+          fruit.updatedBy = authUser.username;
+          matchedFruit = fruit;
+          break;
+        }
+      }
+
+      if (matchedFruit) {
+        saveFruitCatalogToDisk();
+        broadcast('FRUIT_UPDATED', { fruit: matchedFruit });
+      }
+
+      res.json({
+        success: true,
+        message: `Asset "${safeFilename}" saved successfully.${matchedFruit ? ` Auto-linked to ${matchedFruit.name}.` : ''}`,
+        path: webPath,
+        matchedFruit,
+      });
+    } catch (err: any) {
+      console.error('File upload error:', err);
+      res.status(500).json({ success: false, error: `Failed to save asset: ${err?.message || err}` });
+    }
+  });
+
+  // 66e. Batch Auto-Match Fruit Artwork Assets
+  app.post('/api/admin/fruits/batch-match-assets', (req, res) => {
+    const authUser = getAuthUserFromRequest(req);
+    if (!authUser || !hasPermission(authUser, 'MANAGE_FRUITS')) {
+      return res.status(403).json({ success: false, error: 'Permission denied: Cannot manage assets.' });
+    }
+
+    const { overwrite = false } = req.body;
+    const diskAssets = scanAvailableDiskAssets();
+    let matchedCount = 0;
+
+    for (const fruit of fruitsMap.values()) {
+      if (overwrite || !fruit.imageUrl) {
+        const fn = normalizeAssetKey(fruit.name);
+        const fid = normalizeAssetKey(fruit.id);
+        
+        // Check disk assets first
+        const found = diskAssets.find((a) => {
+          const anorm = normalizeAssetKey(a.filename);
+          return anorm === fn || anorm === fid || anorm.replace(/-/g, '') === fn.replace(/-/g, '');
+        });
+
+        if (found) {
+          fruit.imageUrl = found.path;
+          matchedCount++;
+          fruit.updatedAt = Date.now();
+          fruit.updatedBy = authUser.username;
+        }
+      }
+    }
+
+    saveFruitCatalogToDisk();
+    broadcast('CATALOG_ASSETS_MATCHED', { count: fruitsMap.size, matchedCount });
+
+    res.json({
+      success: true,
+      message: `Asset reconciliation complete. Matched ${matchedCount} fruit catalog entries.`,
+      fruits: Array.from(fruitsMap.values()),
+      matchedCount,
+    });
+  });
+
+  // 66f. Update Fruit Artwork Image (URL or Asset Path)
+  app.post('/api/admin/fruits/:fruitId/image', (req, res) => {
+    const authUser = getAuthUserFromRequest(req);
+    if (!authUser || !hasPermission(authUser, 'MANAGE_FRUITS')) {
+      return res.status(403).json({ success: false, error: 'Permission denied: Cannot update fruit artwork.' });
+    }
+
+    const { fruitId } = req.params;
+    const { imageUrl, image_url } = req.body;
+    const fruit = fruitsMap.get(fruitId);
+    if (!fruit) {
+      return res.status(404).json({ success: false, error: 'Fruit not found.' });
+    }
+
+    const newUrl = (imageUrl !== undefined ? imageUrl : image_url || '').trim();
+    fruit.imageUrl = newUrl || undefined;
+    fruit.updatedAt = Date.now();
+    fruit.updatedBy = authUser.username;
+
+    fruitAuditLogs.unshift({
+      id: `faudit-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+      fruitId: fruit.id,
+      fruitName: fruit.name,
+      action: 'UPDATE',
+      actorId: authUser.id,
+      actorUsername: authUser.username,
+      actorRole: authUser.role,
+      changesSummary: newUrl ? `Updated fruit artwork image to ${newUrl}` : `Removed custom artwork image (reset to default)`,
+      timestamp: Date.now(),
+    });
+
+    saveFruitCatalogToDisk();
+    broadcast('FRUIT_UPDATED', { fruit });
+
+    res.json({
+      success: true,
+      message: `Fruit artwork updated for ${fruit.name}.`,
+      fruit,
     });
   });
 
