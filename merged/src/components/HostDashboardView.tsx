@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuthUser, ActiveTab } from '../types';
-import { BLOX_FRUITS_DATA } from '../data/fruits';
+import { useFruits } from '../hooks/useFruits';
 import { apiCreateGiveaway } from '../utils/giveaways';
 import { playClickSound, playTradeSuccessSound } from '../utils/audio';
 
@@ -26,6 +26,7 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
   const [ytVideoId, setYtVideoId] = useState('');
   const [ytBoostCode, setYtBoostCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const fruits = useFruits();
 
   if (!currentUser) {
     return (
@@ -52,7 +53,7 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
     if (!title.trim()) return;
     setLoading(true);
 
-    const fruit = BLOX_FRUITS_DATA.find((f) => f.id === selectedFruitId) || BLOX_FRUITS_DATA[0];
+    const fruit = fruits.find((f) => f.id === selectedFruitId) || fruits[0];
 
     const prize: any = {
       id: `prize-${fruit.id}-${Date.now()}`,
@@ -125,7 +126,7 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
                 onChange={(e) => setSelectedFruitId(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-[#141830] border border-slate-700 rounded-xl text-slate-100 outline-none"
               >
-                {BLOX_FRUITS_DATA.map((fruit) => (
+                {fruits.map((fruit) => (
                   <option key={fruit.id} value={fruit.id}>
                     {fruit.name} ({fruit.rarity})
                   </option>

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthUser, ActiveTab, Fruit } from '../types';
-import { BLOX_FRUITS_DATA } from '../data/fruits';
+import { adminListFruits, updateFruit } from '../utils/fruitsApi';
 import { formatMoney } from '../utils/calc';
 import { isOwner, isAdmin } from '../utils/permissions';
 import { playClickSound, playTradeSuccessSound } from '../utils/audio';
@@ -16,12 +16,26 @@ export const FruitCatalogAdminView: React.FC<FruitCatalogAdminViewProps> = ({
   onNavigateTab,
   onShowAuthModal,
 }) => {
-  const [fruitsList, setFruitsList] = useState<Fruit[]>(BLOX_FRUITS_DATA);
+  const [fruitsList, setFruitsList] = useState<Fruit[]>([]);
   const [editingFruit, setEditingFruit] = useState<Fruit | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const canAccess = isOwner(currentUser) || isAdmin(currentUser);
+
+  useEffect(() => {
+    if (!canAccess) return;
+    let cancelled = false;
+    setLoading(true);
+    adminListFruits()
+      .then((list) => { if (!cancelled) setFruitsList(list); })
+      .catch((err) => { if (!cancelled) setErrorNotice(err.message || 'Failed to load catalog.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [canAccess]);
 
   if (!canAccess) {
     return (
@@ -43,17 +57,29 @@ export const FruitCatalogAdminView: React.FC<FruitCatalogAdminViewProps> = ({
     );
   }
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingFruit) return;
 
-    setFruitsList((prev) =>
-      prev.map((f) => (f.id === editingFruit.id ? editingFruit : f))
-    );
-    playTradeSuccessSound();
-    setSuccessNotice(`Updated valuation parameters for ${editingFruit.name}`);
-    setEditingFruit(null);
-    setTimeout(() => setSuccessNotice(null), 3000);
+    setSaving(true);
+    setErrorNotice(null);
+    try {
+      const updated = await updateFruit(editingFruit.id, {
+        marketValue: editingFruit.marketValue,
+        demand: editingFruit.demand,
+        trend: editingFruit.trend,
+        beliPrice: editingFruit.beliPrice,
+      });
+      setFruitsList((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+      playTradeSuccessSound();
+      setSuccessNotice(`Updated valuation parameters for ${updated.name}`);
+      setEditingFruit(null);
+      setTimeout(() => setSuccessNotice(null), 3000);
+    } catch (err: any) {
+      setErrorNotice(err.message || 'Failed to save changes — you may not have catalog admin access.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const filtered = fruitsList.filter((f) =>
@@ -80,6 +106,17 @@ export const FruitCatalogAdminView: React.FC<FruitCatalogAdminViewProps> = ({
           ← Back to Admin Console
         </button>
       </div>
+
+      {errorNotice && (
+        <div className="mb-6 p-4 bg-rose-950/80 border border-rose-500 rounded-2xl text-rose-300 text-xs font-game font-bold flex items-center gap-2">
+          <span className="material-symbols-outlined text-base">error</span>
+          {errorNotice}
+        </div>
+      )}
+
+      {loading && (
+        <div className="mb-6 text-xs text-slate-400 font-mono">Loading catalog…</div>
+      )}
 
       {successNotice && (
         <div className="mb-6 p-4 bg-emerald-950/80 border border-emerald-500 rounded-2xl text-emerald-300 text-xs font-game font-bold flex items-center gap-2">
@@ -154,9 +191,10 @@ export const FruitCatalogAdminView: React.FC<FruitCatalogAdminViewProps> = ({
               <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-game font-bold uppercase rounded-xl shadow-lg"
+                  disabled={saving}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-game font-bold uppercase rounded-xl shadow-lg disabled:opacity-50"
                 >
-                  Save Changes
+                  {saving ? 'Saving…' : 'Save Changes'}
                 </button>
                 <button
                   type="button"

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Fruit } from '../types';
-import { BLOX_FRUITS_DATA } from '../data/fruits';
+import { useFruits } from '../hooks/useFruits';
 import { BRAND_CONFIG } from '../data/brand';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
@@ -11,12 +11,13 @@ interface ValuesViewProps {
 }
 
 export const ValuesView: React.FC<ValuesViewProps> = ({ onAddFruitToCalc }) => {
+  const fruits = useFruits();
   const [search, setSearch] = useState('');
   const [selectedRarity, setSelectedRarity] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'value' | 'demand' | 'beli' | 'name'>('value');
 
   const filteredFruits = useMemo(() => {
-    return BLOX_FRUITS_DATA.filter((fruit) => {
+    return fruits.filter((fruit) => {
       const matchSearch =
         fruit.name.toLowerCase().includes(search.toLowerCase()) ||
         fruit.rarity.toLowerCase().includes(search.toLowerCase()) ||
@@ -31,7 +32,7 @@ export const ValuesView: React.FC<ValuesViewProps> = ({ onAddFruitToCalc }) => {
       if (sortBy === 'beli') return (b.beliPrice || 0) - (a.beliPrice || 0);
       return a.name.localeCompare(b.name);
     });
-  }, [search, selectedRarity, sortBy]);
+  }, [fruits, search, selectedRarity, sortBy]);
 
   const rarities = [
     { label: 'ALL', color: 'border-slate-700' },

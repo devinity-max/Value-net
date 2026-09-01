@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthUser, Fruit, ProfileTheme, TradingStyle, UserProfile } from '../types';
 import { getStoredUser, setStoredUser } from '../utils/auth';
 import { safeFetchJson } from '../utils/apiHelper';
-import { BLOX_FRUITS_DATA } from '../data/fruits';
+import { useFruits } from '../hooks/useFruits';
 import { playClickSound, playSuccessSound } from '../utils/audio';
 
 interface EditProfileViewProps {
@@ -49,6 +49,7 @@ export const EditProfileView: React.FC<EditProfileViewProps> = ({
   onLoginRequired,
 }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredUser());
+  const fruits = useFruits();
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('swords');
@@ -280,7 +281,7 @@ export const EditProfileView: React.FC<EditProfileViewProps> = ({
             className="w-full bg-[#0e1224] border border-slate-800 focus:border-purple-500 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none"
           >
             <option value="">-- None Selected --</option>
-            {BLOX_FRUITS_DATA.map((fruit) => (
+            {fruits.map((fruit) => (
               <option key={fruit.id} value={fruit.id}>
                 {fruit.name} ({fruit.rarity})
               </option>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Fruit, TraderProfile } from '../types';
-import { BLOX_FRUITS_DATA } from '../data/fruits';
+import { useFruits } from '../hooks/useFruits';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playTradeSuccessSound } from '../utils/audio';
 
@@ -29,6 +29,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
   const [server, setServer] = useState('Second Sea (Cafe)');
   const [notes, setNotes] = useState('');
   const [activePickerSide, setActivePickerSide] = useState<'offering' | 'seeking' | null>(null);
+  const fruits = useFruits();
 
   if (!isOpen) return null;
 
@@ -210,7 +211,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
                 </button>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
-                {BLOX_FRUITS_DATA.map((fruit) => (
+                {fruits.map((fruit) => (
                   <button
                     key={fruit.id}
                     type="button"

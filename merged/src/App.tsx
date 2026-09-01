@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Fruit, ActiveTab, LedgerEntry, AuthUser, TradeAd } from './types';
-import { BLOX_FRUITS_DATA, INITIAL_LEDGER } from './data/fruits';
+import { INITIAL_LEDGER } from './data/fruits';
 import { calculateTrade, formatMoney } from './utils/calc';
 import { Navbar } from './components/Navbar';
 import { FruitSlot } from './components/FruitSlot';

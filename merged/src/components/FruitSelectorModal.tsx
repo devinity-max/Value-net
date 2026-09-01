@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Fruit } from '../types';
-import { BLOX_FRUITS_DATA } from '../data/fruits';
+import { useFruits } from '../hooks/useFruits';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
 
@@ -19,11 +19,12 @@ export const FruitSelectorModal: React.FC<FruitSelectorModalProps> = ({
   targetSide,
   targetSlotIndex,
 }) => {
+  const fruits = useFruits();
   const [search, setSearch] = useState('');
   const [selectedRarity, setSelectedRarity] = useState<string>('ALL');
 
   const filteredFruits = useMemo(() => {
-    return BLOX_FRUITS_DATA.filter((fruit) => {
+    return fruits.filter((fruit) => {
       const matchSearch =
         fruit.name.toLowerCase().includes(search.toLowerCase()) ||
         fruit.rarity.toLowerCase().includes(search.toLowerCase());
@@ -32,7 +33,7 @@ export const FruitSelectorModal: React.FC<FruitSelectorModalProps> = ({
         fruit.rarity.toUpperCase() === selectedRarity.toUpperCase();
       return matchSearch && matchRarity;
     });
-  }, [search, selectedRarity]);
+  }, [fruits, search, selectedRarity]);
 
   if (!isOpen) return null;
 
