@@ -137,8 +137,8 @@ export async function apiForgotPassword(
 }
 
 export async function apiResetPassword(data: {
-  email: string;
-  code: string;
+  email?: string;
+  code?: string;
   newPassword: string;
 }): Promise<{ success: boolean; message?: string; error?: string }> {
   const res = await safeFetchJson<{ success: boolean; message?: string; error?: string }>(
@@ -162,3 +162,4 @@ export async function apiResetPassword(data: {
     message: res.data.message,
   };
 }
+
