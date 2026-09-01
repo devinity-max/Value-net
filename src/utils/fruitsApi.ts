@@ -396,8 +396,9 @@ export async function uploadAssetsZip(file: File): Promise<{
 
 export async function uploadSingleAsset(
   file: File,
-  category: 'Fruit' | 'Variant' | 'Gamepass' = 'Fruit'
-): Promise<{ success: boolean; path: string; matchedFruit?: Fruit }> {
+  category: 'Fruit' | 'Variant' | 'Gamepass' = 'Fruit',
+  fruitId?: string
+): Promise<{ success: boolean; path: string; matchedFruit?: Fruit; assets?: DiskAssetItem[] }> {
   const token = getAuthToken();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -414,6 +415,7 @@ export async function uploadSingleAsset(
             fileBase64: base64,
             filename: file.name,
             category,
+            fruitId,
           }),
         });
 
@@ -435,5 +437,37 @@ export async function uploadSingleAsset(
     reader.readAsDataURL(file);
   });
 }
+
+export async function uploadMultipleAssets(
+  files: File[],
+  category: 'Fruit' | 'Variant' | 'Gamepass' = 'Fruit',
+  onProgress?: (current: number, total: number, filename: string) => void
+): Promise<{ successCount: number; failedCount: number; lastAssets?: DiskAssetItem[] }> {
+  let successCount = 0;
+  let failedCount = 0;
+  let lastAssets: DiskAssetItem[] | undefined;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (onProgress) {
+      onProgress(i + 1, files.length, file.name);
+    }
+    try {
+      const res = await uploadSingleAsset(file, category);
+      if (res.success) {
+        successCount++;
+        if (res.assets) lastAssets = res.assets;
+      } else {
+        failedCount++;
+      }
+    } catch (err) {
+      console.warn(`Failed to upload ${file.name}:`, err);
+      failedCount++;
+    }
+  }
+
+  return { successCount, failedCount, lastAssets };
+}
+
 
 
