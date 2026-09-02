@@ -95,6 +95,49 @@ export async function adminListFruits(filters?: {
   status?: string;
   trend?: string;
 }): Promise<Fruit[]> {
+  // Supabase-direct path (no Express server needed)
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      let query = supabase.from('fruits').select('*').order('sort_order', { ascending: true });
+      if (filters?.rarity && filters.rarity !== 'ALL') {
+        query = query.eq('rarity', filters.rarity);
+      }
+      if (filters?.status && filters.status !== 'ALL') {
+        query = query.eq('status', filters.status);
+      }
+      const { data: dbFruits, error: sbErr } = await query;
+      if (!sbErr && dbFruits) {
+        let results = dbFruits.map((f: any) => ({
+          id: f.id,
+          name: f.name,
+          rarity: f.rarity,
+          beliPrice: Number(f.beli_price || 0),
+          marketValue: Number(f.market_value || 0),
+          demand: Number(f.demand || 1),
+          trend: f.trend || 'Stable',
+          icon: f.icon || 'flare',
+          type: f.type || 'Natural',
+          description: f.description || '',
+          hypeFactor: Number(f.hype_factor || 1),
+          imageUrl: f.image_url,
+          isPermanent: !!f.is_permanent,
+          isArchived: !!f.is_archived,
+          status: f.status || 'ACTIVE',
+          sortOrder: f.sort_order || 99,
+          updatedAt: f.updated_at ? new Date(f.updated_at).getTime() : Date.now(),
+          updatedBy: f.updated_by || 'SYSTEM',
+        })) as Fruit[];
+        if (filters?.query) {
+          const q = filters.query.toLowerCase();
+          results = results.filter((f) => f.name.toLowerCase().includes(q) || f.id.toLowerCase().includes(q));
+        }
+        cache = results;
+        return results;
+      }
+    } catch {}
+  }
+
+  // Fallback: try Express API, then static data
   const token = getAuthToken();
   const queryParams = new URLSearchParams();
   if (filters?.query) queryParams.set('query', filters.query);
@@ -105,9 +148,7 @@ export async function adminListFruits(filters?: {
 
   const res = await safeFetchJson<{ success: boolean; fruits: Fruit[]; error?: string }>(
     `/api/admin/fruits?${queryParams.toString()}`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} }
   );
 
   if (res.success && res.data?.fruits) {
@@ -354,6 +395,19 @@ export async function fetchDiskAssets(): Promise<{
   variantsCount: number;
   gamepassesCount: number;
 }> {
+  // On Vercel/production, there is no local filesystem. Return empty gracefully.
+  // Asset management (artwork) is handled via Supabase Storage instead.
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    return {
+      success: true,
+      assets: [],
+      totalCount: 0,
+      fruitsCount: 0,
+      variantsCount: 0,
+      gamepassesCount: 0,
+    };
+  }
+
   const token = getAuthToken();
   const res = await safeFetchJson<{
     success: boolean;
@@ -389,6 +443,11 @@ export async function uploadAssetsZip(file: File): Promise<{
   assets: DiskAssetItem[];
   fruits: Fruit[];
 }> {
+  // On Vercel, upload via Supabase Storage instead of Express server filesystem
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    throw new Error('ZIP asset upload is not supported on Vercel. Please upload individual PNG files instead.');
+  }
+
   const token = getAuthToken();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -431,6 +490,60 @@ export async function uploadSingleAsset(
   category: 'Fruit' | 'Variant' | 'Gamepass' = 'Fruit',
   fruitId?: string
 ): Promise<{ success: boolean; path: string; matchedFruit?: Fruit; assets?: DiskAssetItem[] }> {
+  // On Vercel: upload directly to Supabase Storage
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    const storagePath = `fruits/${fruitId || file.name.replace(/\.[^.]+$/, '')}/${file.name}`;
+    const { data: uploadData, error: uploadErr } = await supabase.storage
+      .from('fruit-assets')
+      .upload(storagePath, file, { upsert: true, contentType: file.type });
+
+    if (uploadErr) {
+      throw new Error(uploadErr.message || 'Failed to upload to Supabase Storage.');
+    }
+
+    const { data: publicUrlData } = supabase.storage.from('fruit-assets').getPublicUrl(storagePath);
+    const publicUrl = publicUrlData?.publicUrl || '';
+
+    // If a fruitId is specified, update the fruit's image_url in the database
+    if (fruitId && publicUrl) {
+      const { data: updatedFruit } = await supabase
+        .from('fruits')
+        .update({ image_url: publicUrl })
+        .eq('id', fruitId)
+        .select()
+        .maybeSingle();
+
+      if (updatedFruit) {
+        const mapped: Fruit = {
+          id: updatedFruit.id,
+          name: updatedFruit.name,
+          rarity: updatedFruit.rarity,
+          beliPrice: Number(updatedFruit.beli_price || 0),
+          marketValue: Number(updatedFruit.market_value || 0),
+          demand: Number(updatedFruit.demand || 1),
+          trend: updatedFruit.trend || 'Stable',
+          icon: updatedFruit.icon || 'flare',
+          type: updatedFruit.type || 'Natural',
+          description: updatedFruit.description || '',
+          hypeFactor: Number(updatedFruit.hype_factor || 1),
+          imageUrl: publicUrl,
+          isPermanent: !!updatedFruit.is_permanent,
+          isArchived: !!updatedFruit.is_archived,
+          status: updatedFruit.status || 'ACTIVE',
+          sortOrder: updatedFruit.sort_order || 99,
+          updatedAt: Date.now(),
+          updatedBy: 'ADMIN',
+        };
+        cache = cache.map((f) => (f.id === fruitId ? mapped : f));
+        notifyListeners();
+        return { success: true, path: publicUrl, matchedFruit: mapped };
+      }
+    }
+
+    return { success: true, path: publicUrl };
+  }
+
+  // Local dev fallback: use Express server
   const token = getAuthToken();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

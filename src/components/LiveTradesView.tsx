@@ -8,6 +8,7 @@ import { TradeChatPanel } from './TradeChatPanel';
 import { TraderProfileModal } from './TraderProfileModal';
 import { NotificationToast } from './NotificationToast';
 import { safeFetchJson } from '../utils/apiHelper';
+import { supabase } from '../lib/supabaseClient';
 import { TrustBadge } from './TrustBadge';
 import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
@@ -46,9 +47,48 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     return `${hours}h ago`;
   };
 
-  // 1. Initial REST Fetch
+  // 1. Initial REST Fetch - use Supabase directly if available
   const fetchTrades = async () => {
     try {
+      if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+        const { data: tradeAds, error: sbErr } = await supabase
+          .from('trade_ads')
+          .select('*')
+          .in('status', ['ACTIVE', 'IN_PROGRESS'])
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (!sbErr && tradeAds) {
+          const uniqueMap = new Map<string, TradeAd>();
+          tradeAds.forEach((t: any) => {
+            if (t && t.id) {
+              const mapped: TradeAd = {
+                id: t.id,
+                creatorId: t.creator_id,
+                creatorName: t.creator_name || 'Trader',
+                creatorAvatar: t.creator_avatar || 'person',
+                server: t.server || 'Sea 3',
+                offeredFruits: typeof t.offered_fruits === 'string' ? JSON.parse(t.offered_fruits) : (t.offered_fruits || []),
+                requestedFruits: typeof t.requested_fruits === 'string' ? JSON.parse(t.requested_fruits) : (t.requested_fruits || []),
+                offeredTotalValue: Number(t.offered_total_value || 0),
+                requestedTotalValue: Number(t.requested_total_value || 0),
+                verdict: t.verdict || 'FAIR',
+                note: t.note || '',
+                status: t.status || 'ACTIVE',
+                sessionId: t.session_id,
+                acceptedBy: t.accepted_by,
+                acceptedByName: t.accepted_by_name,
+                createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+              } as TradeAd;
+              uniqueMap.set(t.id, mapped);
+            }
+          });
+          setTrades(Array.from(uniqueMap.values()));
+          return;
+        }
+      }
+
+      // Fallback: try Express API
       const res = await safeFetchJson<{ success: boolean; trades: TradeAd[] }>(
         `/api/trades?userId=${encodeURIComponent(currentUser.id)}`
       );
@@ -60,7 +100,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         setTrades(Array.from(uniqueMap.values()));
       }
     } catch (err) {
-      console.error('Failed to fetch trades', err);
+      console.warn('Failed to fetch trades — showing empty board:', err);
     } finally {
       setIsLoading(false);
     }
@@ -68,22 +108,29 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
 
   // 2. Fetch User Active Sessions
   const checkActiveSessions = async () => {
+    // Skip on Vercel — sessions are managed through Supabase Realtime trade_sessions
+    if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+      return;
+    }
     try {
       const res = await safeFetchJson<{ success: boolean; sessions: TradeSession[] }>(
         `/api/users/${encodeURIComponent(currentUser.id)}/active-sessions`
       );
       if (res.success && res.data && res.data.sessions && res.data.sessions.length > 0) {
-        // Load latest session
         const currentActive = res.data.sessions[0];
         setActiveSession(currentActive);
         loadSessionMessages(currentActive.id);
       }
     } catch (e) {
-      console.error('Failed to check active sessions', e);
+      console.warn('Failed to check active sessions', e);
     }
   };
 
   const loadSessionMessages = async (sessionId: string) => {
+    // Skip on Vercel
+    if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+      return;
+    }
     try {
       const res = await safeFetchJson<{ success: boolean; session: TradeSession; messages: TradeMessage[] }>(
         `/api/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(currentUser.id)}`
@@ -93,14 +140,19 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         setSessionMessages(res.data.messages || []);
       }
     } catch (e) {
-      console.error('Failed to load session messages', e);
+      console.warn('Failed to load session messages', e);
     }
   };
 
-  // 3. Realtime WebSocket Connection
+  // 3. Realtime WebSocket Connection (only on local dev; Vercel uses Supabase Realtime)
   useEffect(() => {
     fetchTrades();
     checkActiveSessions();
+
+    // On Vercel (Supabase-connected), skip WebSocket and use Supabase Realtime instead
+    if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+      return () => {};
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
