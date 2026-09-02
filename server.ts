@@ -2519,7 +2519,7 @@ setInterval(() => {
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-async function startServer() {
+function startServer() {
   // Ensure asset directories exist on disk
   const ASSETS_FRUITS_DIR = path.join(process.cwd(), 'public/assets/fruits');
   const ASSETS_VARIANTS_DIR = path.join(process.cwd(), 'public/assets/variants');
@@ -7809,11 +7809,14 @@ async function startServer() {
   // Vite Integration & Static Serving
   // ==========================================
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
+    }).then((vite) => {
+      app.use(vite.middlewares);
+    }).catch((err) => {
+      console.error('Vite dev server init error:', err);
     });
-    app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -7829,8 +7832,6 @@ async function startServer() {
   }
 }
 
-if (!process.env.VERCEL) {
-  startServer();
-}
+startServer();
 
 export default app;
