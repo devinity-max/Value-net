@@ -1,5 +1,6 @@
 import { AuthUser } from '../types';
 import { safeFetchJson } from './apiHelper';
+import { supabase } from '../lib/supabaseClient';
 
 const AUTH_USER_STORAGE_KEY = 'valuenet_auth_user';
 
@@ -34,30 +35,97 @@ export async function apiLogin(
   identifierOrCredentials: string | { identifier?: string; username?: string; password?: string },
   maybePassword?: string
 ): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
-  let bodyPayload: { identifier: string; password?: string };
+  let identifier = '';
+  let password = '';
 
   if (typeof identifierOrCredentials === 'string') {
-    bodyPayload = {
-      identifier: identifierOrCredentials,
-      password: maybePassword,
-    };
+    identifier = identifierOrCredentials;
+    password = maybePassword || '';
   } else {
-    bodyPayload = {
-      identifier: identifierOrCredentials.identifier || identifierOrCredentials.username || '',
-      password: identifierOrCredentials.password,
-    };
+    identifier = identifierOrCredentials.identifier || identifierOrCredentials.username || '';
+    password = identifierOrCredentials.password || '';
   }
 
+  // 1. Supabase Auth Direct Integration
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      let emailToUse = identifier;
+      if (!identifier.includes('@')) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('email, id, username')
+          .eq('username', identifier)
+          .maybeSingle();
+        if (profile?.email) {
+          emailToUse = profile.email;
+        }
+      }
+
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: emailToUse,
+        password: password,
+      });
+
+      if (!authErr && authData?.user) {
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authData.user.id)
+          .maybeSingle();
+
+        const authUser: AuthUser = {
+          id: authData.user.id,
+          username: userProfile?.username || authData.user.email?.split('@')[0] || 'user',
+          displayName: userProfile?.display_name || userProfile?.username || 'Trader',
+          email: authData.user.email || '',
+          avatarUrl: userProfile?.avatar_url || 'person',
+          token: authData.session?.access_token || 'sb-token',
+          role: (userProfile?.role as any) || 'MEMBER',
+          profile: userProfile as any || {
+            id: authData.user.id,
+            username: userProfile?.username || 'user',
+            displayName: userProfile?.display_name || 'Trader',
+            role: userProfile?.role || 'MEMBER',
+            avatarUrl: 'person',
+            bannerUrl: 'midnight',
+            bio: '',
+            status: 'ONLINE',
+            titleId: 'trader',
+            tradingStyle: 'Fair Trades',
+            lookingFor: [],
+            notInterestedIn: [],
+            profileTheme: 'midnight',
+            showProfile: true,
+            showPreferences: true,
+            showActivity: true,
+            showTradeStats: true,
+            server: 'Sea 3',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        };
+
+        setStoredUser(authUser);
+        return { success: true, user: authUser };
+      } else if (authErr) {
+        console.warn('Supabase Auth response:', authErr.message);
+      }
+    } catch (sbErr) {
+      console.warn('Supabase Auth error:', sbErr);
+    }
+  }
+
+  // 2. Local Express Server Fallback
   const res = await safeFetchJson<{ success: boolean; user: AuthUser; error?: string }>('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(bodyPayload),
+    body: JSON.stringify({ identifier, password }),
   });
 
   if (!res.success || !res.data?.success || !res.data.user) {
     return {
       success: false,
-      error: res.data?.error || res.error || 'Invalid username or password.',
+      error: res.data?.error || res.error || 'Invalid username/email or password.',
     };
   }
 
@@ -70,27 +138,82 @@ export async function apiSignup(
   maybePassword?: string,
   maybeEmail?: string
 ): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
-  let bodyPayload: { username: string; email?: string; password?: string; displayName?: string };
+  let username = '';
+  let email = '';
+  let password = '';
+  let displayName = '';
 
   if (typeof usernameOrData === 'string') {
-    bodyPayload = {
-      username: usernameOrData,
-      password: maybePassword,
-      email: maybeEmail || `${usernameOrData.toLowerCase()}@valuenet.local`,
-    };
+    username = usernameOrData;
+    password = maybePassword || '';
+    email = maybeEmail || `${username.toLowerCase()}@valuenet.local`;
+    displayName = username;
   } else {
-    bodyPayload = {
-      username: usernameOrData.username,
-      email: usernameOrData.email || `${usernameOrData.username.toLowerCase()}@valuenet.local`,
-      password: usernameOrData.password,
-      displayName: usernameOrData.displayName,
-    };
+    username = usernameOrData.username;
+    email = usernameOrData.email || `${usernameOrData.username.toLowerCase()}@valuenet.local`;
+    password = usernameOrData.password || '';
+    displayName = usernameOrData.displayName || username;
+  }
+
+  // Supabase Signup Direct Integration
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username,
+            displayName,
+          },
+        },
+      });
+
+      if (!authErr && authData?.user) {
+        const authUser: AuthUser = {
+          id: authData.user.id,
+          username,
+          displayName,
+          email,
+          avatarUrl: 'person',
+          token: authData.session?.access_token || 'sb-token',
+          role: 'MEMBER',
+          profile: {
+            id: authData.user.id,
+            username,
+            displayName,
+            role: 'MEMBER',
+            avatarUrl: 'person',
+            bannerUrl: 'midnight',
+            bio: '',
+            status: 'ONLINE',
+            titleId: 'trader',
+            tradingStyle: 'Fair Trades',
+            lookingFor: [],
+            notInterestedIn: [],
+            profileTheme: 'midnight',
+            showProfile: true,
+            showPreferences: true,
+            showActivity: true,
+            showTradeStats: true,
+            server: 'Sea 3',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        };
+
+        setStoredUser(authUser);
+        return { success: true, user: authUser };
+      }
+    } catch (sbErr) {
+      console.warn('Supabase Signup fallback:', sbErr);
+    }
   }
 
   const res = await safeFetchJson<{ success: boolean; user: AuthUser; error?: string }>('/api/auth/signup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(bodyPayload),
+    body: JSON.stringify({ username, email, password, displayName }),
   });
 
   if (!res.success || !res.data?.success || !res.data.user) {
@@ -107,6 +230,11 @@ export async function apiSignup(
 export const apiRegister = apiSignup;
 
 export async function apiLogout(): Promise<void> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+  }
   const token = getAuthToken();
   if (token) {
     try {
@@ -123,27 +251,51 @@ export async function apiLogout(): Promise<void> {
 }
 
 export async function apiGetMe(): Promise<AuthUser | null> {
-  const token = getAuthToken();
-  if (!token) return null;
+  const stored = getStoredUser();
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { data: { user: sbUser } } = await supabase.auth.getUser();
+      if (sbUser) {
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sbUser.id)
+          .maybeSingle();
 
-  const res = await safeFetchJson<{ success: boolean; user: AuthUser; error?: string }>('/api/auth/me', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (res.success && res.data?.success && res.data.user) {
-    setStoredUser(res.data.user);
-    return res.data.user;
+        if (userProfile) {
+          const authUser: AuthUser = {
+            id: sbUser.id,
+            username: userProfile.username || sbUser.email?.split('@')[0] || 'user',
+            displayName: userProfile.display_name || userProfile.username || 'Trader',
+            email: sbUser.email || '',
+            avatarUrl: userProfile.avatar_url || 'person',
+            token: stored?.token || 'sb-token',
+            role: (userProfile.role as any) || 'MEMBER',
+            profile: userProfile as any,
+          };
+          setStoredUser(authUser);
+          return authUser;
+        }
+      }
+    } catch {}
   }
 
-  setStoredUser(null);
+  if (stored) return stored;
   return null;
 }
 
 export async function apiForgotPassword(
   email: string
 ): Promise<{ success: boolean; message?: string; code?: string; error?: string }> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      if (!error) {
+        return { success: true, message: 'Password reset instructions sent to your email.' };
+      }
+    } catch {}
+  }
+
   const res = await safeFetchJson<{ success: boolean; message?: string; code?: string; error?: string }>(
     '/api/auth/forgot-password',
     {
@@ -172,6 +324,15 @@ export async function apiResetPassword(data: {
   code?: string;
   newPassword: string;
 }): Promise<{ success: boolean; message?: string; error?: string }> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { error } = await supabase.auth.updateUser({ password: data.newPassword });
+      if (!error) {
+        return { success: true, message: 'Your password has been successfully reset.' };
+      }
+    } catch {}
+  }
+
   const res = await safeFetchJson<{ success: boolean; message?: string; error?: string }>(
     '/api/auth/reset-password',
     {

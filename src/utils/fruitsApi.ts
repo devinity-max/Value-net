@@ -2,6 +2,7 @@ import { Fruit } from '../types';
 import { BLOX_FRUITS_DATA } from '../data/fruits';
 import { safeFetchJson } from './apiHelper';
 import { getAuthToken } from './auth';
+import { supabase } from '../lib/supabaseClient';
 
 let cache: Fruit[] = [...BLOX_FRUITS_DATA];
 let cacheLoaded = false;
@@ -18,6 +19,38 @@ async function fetchActiveFruits(): Promise<Fruit[]> {
 
   inFlight = (async () => {
     try {
+      if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+        const { data: dbFruits, error: sbErr } = await supabase
+          .from('fruits')
+          .select('*')
+          .order('sort_order', { ascending: true });
+
+        if (!sbErr && dbFruits && dbFruits.length > 0) {
+          cache = dbFruits.map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            rarity: f.rarity,
+            beliPrice: Number(f.beli_price || f.beliPrice || 0),
+            marketValue: Number(f.market_value || f.marketValue || 0),
+            demand: Number(f.demand || 1),
+            trend: f.trend || 'Stable',
+            icon: f.icon || 'flare',
+            type: f.type || 'Natural',
+            description: f.description || '',
+            hypeFactor: Number(f.hype_factor || f.hypeFactor || 1),
+            imageUrl: f.image_url || f.imageUrl,
+            isPermanent: !!f.is_permanent,
+            isArchived: !!f.is_archived,
+            status: f.status || 'ACTIVE',
+            sortOrder: f.sort_order || f.sortOrder || 99,
+            updatedAt: f.updated_at ? new Date(f.updated_at).getTime() : Date.now(),
+            updatedBy: f.updated_by || 'SYSTEM',
+          }));
+          cacheLoaded = true;
+          return cache;
+        }
+      }
+
       const res = await safeFetchJson<{ success: boolean; fruits: Fruit[] }>('/api/fruits');
       if (res.success && res.data?.fruits && Array.isArray(res.data.fruits) && res.data.fruits.length > 0) {
         cache = res.data.fruits;
@@ -81,7 +114,6 @@ export async function adminListFruits(filters?: {
     return res.data.fruits;
   }
 
-  // Fallback to public catalog or data
   const base = cache.length > 0 ? cache : BLOX_FRUITS_DATA;
   let filtered = [...base];
   if (filters?.rarity && filters.rarity !== 'ALL') {
@@ -468,6 +500,3 @@ export async function uploadMultipleAssets(
 
   return { successCount, failedCount, lastAssets };
 }
-
-
-

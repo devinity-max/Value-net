@@ -1,5 +1,6 @@
 import { GiveawayItem, GiveawayEntry, GiveawayReport } from '../types';
 import { fetchApi } from './apiHelper';
+import { supabase } from '../lib/supabaseClient';
 
 export async function apiGetGiveaways(params?: {
   filter?: string;
@@ -9,16 +10,69 @@ export async function apiGetGiveaways(params?: {
   page?: number;
   limit?: number;
 }): Promise<{ success: boolean; giveaways: GiveawayItem[]; total?: number; error?: string }> {
-  const query = new URLSearchParams();
-  if (params?.filter) query.set('filter', params.filter);
-  if (params?.search) query.set('search', params.search);
-  if (params?.rarity) query.set('rarity', params.rarity);
-  if (params?.hostId) query.set('hostId', params.hostId);
-  if (params?.page) query.set('page', String(params.page));
-  if (params?.limit) query.set('limit', String(params.limit));
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      let query = supabase.from('giveaways').select('*').order('created_at', { ascending: false });
+      if (params?.hostId) {
+        query = query.eq('host_id', params.hostId);
+      }
+      const { data: dbGiveaways, error: sbErr } = await query;
+
+      if (!sbErr && dbGiveaways) {
+        const formatted: GiveawayItem[] = dbGiveaways.map((gw: any) => ({
+          id: gw.id,
+          hostId: gw.host_id,
+          hostName: gw.host_name,
+          hostDisplayName: gw.host_display_name,
+          hostAvatar: gw.host_avatar || 'person',
+          hostTitle: gw.host_title || 'host',
+          hostRole: gw.host_role || 'MEMBER',
+          hostBadges: gw.host_badges || [],
+          title: gw.title,
+          description: gw.description || '',
+          prizes: typeof gw.prizes === 'string' ? JSON.parse(gw.prizes) : (gw.prizes || []),
+          rules: typeof gw.rules === 'string' ? JSON.parse(gw.rules) : (gw.rules || []),
+          eligibility: typeof gw.eligibility === 'string' ? JSON.parse(gw.eligibility) : (gw.eligibility || {}),
+          status: gw.status || 'ACTIVE',
+          startsAt: gw.starts_at ? new Date(gw.starts_at).getTime() : Date.now(),
+          endsAt: gw.ends_at ? new Date(gw.ends_at).getTime() : Date.now() + 86400000,
+          maxParticipants: gw.max_participants,
+          participantCount: gw.participant_count || 0,
+          allowLeave: gw.allow_leave ?? true,
+          createdAt: gw.created_at ? new Date(gw.created_at).getTime() : Date.now(),
+          updatedAt: gw.updated_at ? new Date(gw.updated_at).getTime() : Date.now(),
+          winnerId: gw.winner_id,
+          winnerUsername: gw.winner_username,
+          winnerDisplayName: gw.winner_display_name,
+          winnerAvatar: gw.winner_avatar,
+          completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
+          youtubeBoostEnabled: !!gw.youtube_boost_enabled,
+          youtubeVideoId: gw.youtube_video_id,
+          youtubeBoostPercentage: Number(gw.youtube_boost_percentage || 0),
+          youtubeRedemptionCount: Number(gw.youtube_redemption_count || 0),
+        }));
+
+        return {
+          success: true,
+          giveaways: formatted,
+          total: formatted.length,
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase giveaways fetch fallback:', err);
+    }
+  }
+
+  const queryParams = new URLSearchParams();
+  if (params?.filter) queryParams.set('filter', params.filter);
+  if (params?.search) queryParams.set('search', params.search);
+  if (params?.rarity) queryParams.set('rarity', params.rarity);
+  if (params?.hostId) queryParams.set('hostId', params.hostId);
+  if (params?.page) queryParams.set('page', String(params.page));
+  if (params?.limit) queryParams.set('limit', String(params.limit));
 
   const res = await fetchApi<{ success: boolean; giveaways: GiveawayItem[]; total?: number }>(
-    `/api/giveaways?${query.toString()}`
+    `/api/giveaways?${queryParams.toString()}`
   );
   if (res.success && Array.isArray(res.giveaways)) {
     return {
@@ -35,6 +89,54 @@ export async function apiGetGiveaway(id: string): Promise<{
   giveaway?: GiveawayItem;
   error?: string;
 }> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { data: gw, error: sbErr } = await supabase
+        .from('giveaways')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (!sbErr && gw) {
+        return {
+          success: true,
+          giveaway: {
+            id: gw.id,
+            hostId: gw.host_id,
+            hostName: gw.host_name,
+            hostDisplayName: gw.host_display_name,
+            hostAvatar: gw.host_avatar || 'person',
+            hostTitle: gw.host_title || 'host',
+            hostRole: gw.host_role || 'MEMBER',
+            hostBadges: gw.host_badges || [],
+            title: gw.title,
+            description: gw.description || '',
+            prizes: typeof gw.prizes === 'string' ? JSON.parse(gw.prizes) : (gw.prizes || []),
+            rules: typeof gw.rules === 'string' ? JSON.parse(gw.rules) : (gw.rules || []),
+            eligibility: typeof gw.eligibility === 'string' ? JSON.parse(gw.eligibility) : (gw.eligibility || {}),
+            status: gw.status || 'ACTIVE',
+            startsAt: gw.starts_at ? new Date(gw.starts_at).getTime() : Date.now(),
+            endsAt: gw.ends_at ? new Date(gw.ends_at).getTime() : Date.now() + 86400000,
+            maxParticipants: gw.max_participants,
+            participantCount: gw.participant_count || 0,
+            allowLeave: gw.allow_leave ?? true,
+            createdAt: gw.created_at ? new Date(gw.created_at).getTime() : Date.now(),
+            updatedAt: gw.updated_at ? new Date(gw.updated_at).getTime() : Date.now(),
+            winnerId: gw.winner_id,
+            winnerUsername: gw.winner_username,
+            winnerDisplayName: gw.winner_display_name,
+            winnerAvatar: gw.winner_avatar,
+            completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
+            youtubeBoostEnabled: !!gw.youtube_boost_enabled,
+            youtubeVideoId: gw.youtube_video_id,
+            youtubeBoostPercentage: Number(gw.youtube_boost_percentage || 0),
+            youtubeRedemptionCount: Number(gw.youtube_redemption_count || 0),
+          },
+        };
+      }
+    } catch {}
+  }
+
   const res = await fetchApi<{ success: boolean; giveaway?: GiveawayItem }>(`/api/giveaways/${id}`);
   if (res.success && res.giveaway) {
     return { success: true, giveaway: res.giveaway as GiveawayItem };
@@ -154,6 +256,25 @@ export async function apiRedeemGiveawayBoost(
   requiresJoin?: boolean;
   error?: string;
 }> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { data, error } = await supabase.rpc('redeem_giveaway_secret_code', {
+        p_giveaway_id: giveawayId,
+        p_code: code.trim(),
+      });
+
+      if (!error && data) {
+        return {
+          success: !!data.success,
+          message: data.message || data.error,
+          error: data.success ? undefined : (data.error || 'Failed to verify secret code.'),
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase secret code RPC fallback:', err);
+    }
+  }
+
   const res = await fetchApi<{
     success: boolean;
     message?: string;
@@ -252,11 +373,11 @@ export async function apiGetGiveawayParticipants(
   totalWeight?: number;
   error?: string;
 }> {
-  const query = new URLSearchParams();
-  if (params?.query) query.set('query', params.query);
-  if (params?.boostedOnly) query.set('boostedOnly', 'true');
-  if (params?.page) query.set('page', String(params.page));
-  if (params?.limit) query.set('limit', String(params.limit));
+  const queryParams = new URLSearchParams();
+  if (params?.query) queryParams.set('query', params.query);
+  if (params?.boostedOnly) queryParams.set('boostedOnly', 'true');
+  if (params?.page) queryParams.set('page', String(params.page));
+  if (params?.limit) queryParams.set('limit', String(params.limit));
 
   const res = await fetchApi<{
     success: boolean;
@@ -264,7 +385,7 @@ export async function apiGetGiveawayParticipants(
     total?: number;
     boostedCount?: number;
     totalWeight?: number;
-  }>(`/api/giveaways/${giveawayId}/participants?${query.toString()}`);
+  }>(`/api/giveaways/${giveawayId}/participants?${queryParams.toString()}`);
 
   if (res.success && Array.isArray(res.participants)) {
     return {
