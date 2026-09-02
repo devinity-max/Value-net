@@ -25,13 +25,16 @@ export const FruitSelectorModal: React.FC<FruitSelectorModalProps> = ({
   const [selectedRarity, setSelectedRarity] = useState<string>('ALL');
 
   const filteredFruits = useMemo(() => {
-    return fruits.filter((fruit) => {
+    return (fruits || []).filter((fruit): fruit is Fruit => {
+      if (!fruit) return false;
+      const name = fruit.name || '';
+      const rarity = fruit.rarity || '';
       const matchSearch =
-        fruit.name.toLowerCase().includes(search.toLowerCase()) ||
-        fruit.rarity.toLowerCase().includes(search.toLowerCase());
+        name.toLowerCase().includes(search.toLowerCase()) ||
+        rarity.toLowerCase().includes(search.toLowerCase());
       const matchRarity =
         selectedRarity === 'ALL' ||
-        fruit.rarity.toUpperCase() === selectedRarity.toUpperCase();
+        rarity.toUpperCase() === selectedRarity.toUpperCase();
       return matchSearch && matchRarity;
     });
   }, [fruits, search, selectedRarity]);

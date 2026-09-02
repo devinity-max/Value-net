@@ -389,8 +389,17 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
       )}
 
       {/* Header & Controls */}
-      <div className="text-center mb-10">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#161b36] border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.15)] mb-4">
+      <div className="text-center mb-10 flex flex-col items-center">
+        <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl p-0.5 bg-gradient-to-tr from-[#7c3aed] via-[#a855f7] to-[#fbbf24] shadow-[0_0_25px_rgba(168,85,247,0.4)] mb-3 overflow-hidden">
+          <img
+            src="/assets/logo.png"
+            alt="Value.NET Official Logo"
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover rounded-[14px]"
+          />
+        </div>
+
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#161b36] border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.15)] mb-3">
           <span
             className={`w-2 h-2 rounded-full ${
               wsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'

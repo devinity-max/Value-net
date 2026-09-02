@@ -30,14 +30,28 @@ export function setStoredUser(user: AuthUser | null): void {
   }
 }
 
-export async function apiLogin(credentials: {
-  identifier: string;
-  password: string;
-}): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+export async function apiLogin(
+  identifierOrCredentials: string | { identifier?: string; username?: string; password?: string },
+  maybePassword?: string
+): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+  let bodyPayload: { identifier: string; password?: string };
+
+  if (typeof identifierOrCredentials === 'string') {
+    bodyPayload = {
+      identifier: identifierOrCredentials,
+      password: maybePassword,
+    };
+  } else {
+    bodyPayload = {
+      identifier: identifierOrCredentials.identifier || identifierOrCredentials.username || '',
+      password: identifierOrCredentials.password,
+    };
+  }
+
   const res = await safeFetchJson<{ success: boolean; user: AuthUser; error?: string }>('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(credentials),
+    body: JSON.stringify(bodyPayload),
   });
 
   if (!res.success || !res.data?.success || !res.data.user) {
@@ -51,16 +65,32 @@ export async function apiLogin(credentials: {
   return { success: true, user: res.data.user };
 }
 
-export async function apiSignup(data: {
-  username: string;
-  email: string;
-  password: string;
-  displayName?: string;
-}): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+export async function apiSignup(
+  usernameOrData: string | { username: string; email?: string; password?: string; displayName?: string },
+  maybePassword?: string,
+  maybeEmail?: string
+): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+  let bodyPayload: { username: string; email?: string; password?: string; displayName?: string };
+
+  if (typeof usernameOrData === 'string') {
+    bodyPayload = {
+      username: usernameOrData,
+      password: maybePassword,
+      email: maybeEmail || `${usernameOrData.toLowerCase()}@valuenet.local`,
+    };
+  } else {
+    bodyPayload = {
+      username: usernameOrData.username,
+      email: usernameOrData.email || `${usernameOrData.username.toLowerCase()}@valuenet.local`,
+      password: usernameOrData.password,
+      displayName: usernameOrData.displayName,
+    };
+  }
+
   const res = await safeFetchJson<{ success: boolean; user: AuthUser; error?: string }>('/api/auth/signup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: JSON.stringify(bodyPayload),
   });
 
   if (!res.success || !res.data?.success || !res.data.user) {
@@ -73,6 +103,8 @@ export async function apiSignup(data: {
   setStoredUser(res.data.user);
   return { success: true, user: res.data.user };
 }
+
+export const apiRegister = apiSignup;
 
 export async function apiLogout(): Promise<void> {
   const token = getAuthToken();
@@ -105,7 +137,6 @@ export async function apiGetMe(): Promise<AuthUser | null> {
     return res.data.user;
   }
 
-  // If token is invalid or expired, clear storage
   setStoredUser(null);
   return null;
 }
@@ -162,4 +193,3 @@ export async function apiResetPassword(data: {
     message: res.data.message,
   };
 }
-

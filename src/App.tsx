@@ -302,7 +302,7 @@ export default function App() {
       />
 
       {/* System Survival / Emergency Protection Banner */}
-      {(systemHealth?.loadState === 'PROTECTION' || systemHealth?.isEmergencyMode) && (
+      {(systemHealth?.loadState === 'CRITICAL' || systemHealth?.isEmergencyMode) && (
         <div className="fixed top-20 left-0 right-0 z-40 bg-gradient-to-r from-amber-950/90 via-rose-950/90 to-amber-950/90 border-b border-amber-500/40 px-4 py-2 text-center backdrop-blur-md shadow-lg">
           <div className="max-w-[1200px] mx-auto flex items-center justify-center gap-2.5 text-xs font-game font-bold text-amber-200">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
@@ -513,6 +513,7 @@ export default function App() {
                 onOpenAuth={() => setIsAuthModalOpen(true)}
                 onViewTraderProfile={handleViewTraderProfile}
                 onShowToast={showToast}
+                onNavigateToTab={setActiveTab}
               />
             </div>
           </ErrorBoundary>

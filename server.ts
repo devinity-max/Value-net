@@ -3625,8 +3625,8 @@ async function startServer() {
   // AUTHENTICATION & PLAYER PROFILES REST API
   // ==========================================
 
-  // 13. Auth: Sign Up
-  app.post('/api/auth/signup', (req, res) => {
+  // 13. Auth: Sign Up (supports /signup and /register aliases)
+  app.post(['/api/auth/signup', '/api/auth/register'], (req, res) => {
     const { username, email, password, displayName } = req.body;
 
     if (!username || typeof username !== 'string') {
@@ -4658,8 +4658,8 @@ async function startServer() {
     });
   });
 
-  // 26. Join Giveaway (Authenticated Members)
-  app.post('/api/giveaways/:id/join', (req, res) => {
+  // 26. Join Giveaway (Authenticated Members) - supports /join and /enter aliases
+  app.post(['/api/giveaways/:id/join', '/api/giveaways/:id/enter'], (req, res) => {
     const authUser = getAuthUserFromRequest(req);
     if (!authUser) {
       return res.status(401).json({ success: false, error: 'Sign in to enter this giveaway.' });
@@ -4804,8 +4804,8 @@ async function startServer() {
     });
   });
 
-  // 28. Redeem Secret YouTube Video Giveaway Boost (Secure Server-Side Hash Verification)
-  app.post('/api/giveaways/:id/redeem-boost', (req, res) => {
+  // 28. Redeem Secret YouTube Video Giveaway Boost (Secure Server-Side Hash Verification) - supports /redeem-boost and /verify-code aliases
+  app.post(['/api/giveaways/:id/redeem-boost', '/api/giveaways/:id/verify-code'], (req, res) => {
     const authUser = getAuthUserFromRequest(req);
     if (!authUser) {
       return res.status(401).json({ success: false, error: 'Authentication required to redeem giveaway boost.' });
@@ -4815,6 +4815,15 @@ async function startServer() {
     const gw = giveaways.get(id);
     if (!gw) {
       return res.status(404).json({ success: false, error: 'Giveaway not found.' });
+    }
+
+    // Protect verification endpoint against brute-force attempts with lightweight rate-limiting
+    const redeemLimit = checkRateLimit(`gw_redeem:${authUser.id}:${id}`, 6, 60000, 1000);
+    if (!redeemLimit.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many secret code verification attempts. Please wait a moment before trying again.',
+      });
     }
 
     if (gw.status !== 'ACTIVE') {
@@ -4827,7 +4836,7 @@ async function startServer() {
     if (!gw.youtubeBoostEnabled || !gw.youtubeCodeHash || !gw.youtubeCodeSalt) {
       return res.status(400).json({
         success: false,
-        error: 'This giveaway does not have a YouTube code boost enabled.',
+        error: 'This giveaway does not have a secret YouTube boost code enabled.',
       });
     }
 
@@ -4850,10 +4859,11 @@ async function startServer() {
       });
     }
 
+    // Strict uniqueness check: Only ONE successful redemption per user per giveaway
     if (userEntry.hasYoutubeBoost) {
       return res.status(400).json({
         success: false,
-        error: `You have already redeemed your YouTube boost (+${userEntry.boostPercentage || gw.youtubeBoostPercentage || 10}%) for this giveaway!`,
+        error: `You have already redeemed your secret code (+${userEntry.boostPercentage || gw.youtubeBoostPercentage || 10}%) for this giveaway!`,
         alreadyBoosted: true,
       });
     }
@@ -4869,12 +4879,12 @@ async function startServer() {
     if (!isMatch) {
       return res.status(400).json({
         success: false,
-        error: 'Incorrect secret code! Watch the creator\'s video carefully to find the giveaway boost code.',
+        error: 'Invalid secret code. Please verify the code from the creator\'s video and try again.',
       });
     }
 
-    // Apply Boost to Participant Entry
-    const boostPct = gw.youtubeBoostPercentage || 10;
+    // Apply Boost to Participant Entry (determined strictly server-side)
+    const boostPct = Number(gw.youtubeBoostPercentage) === 5 ? 5 : 10;
     userEntry.hasYoutubeBoost = true;
     userEntry.boostPercentage = boostPct;
     userEntry.boostRedeemedAt = Date.now();

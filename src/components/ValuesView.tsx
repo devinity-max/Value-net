@@ -18,21 +18,27 @@ export const ValuesView: React.FC<ValuesViewProps> = ({ onAddFruitToCalc }) => {
   const [sortBy, setSortBy] = useState<'value' | 'demand' | 'beli' | 'name'>('value');
 
   const filteredFruits = useMemo(() => {
-    return fruits.filter((fruit) => {
-      const matchSearch =
-        fruit.name.toLowerCase().includes(search.toLowerCase()) ||
-        fruit.rarity.toLowerCase().includes(search.toLowerCase()) ||
-        fruit.type.toLowerCase().includes(search.toLowerCase());
-      const matchRarity =
-        selectedRarity === 'ALL' ||
-        fruit.rarity.toUpperCase() === selectedRarity.toUpperCase();
-      return matchSearch && matchRarity;
-    }).sort((a, b) => {
-      if (sortBy === 'value') return b.marketValue - a.marketValue;
-      if (sortBy === 'demand') return (b.demand || 0) - (a.demand || 0);
-      if (sortBy === 'beli') return (b.beliPrice || 0) - (a.beliPrice || 0);
-      return a.name.localeCompare(b.name);
-    });
+    return (fruits || [])
+      .filter((fruit): fruit is Fruit => {
+        if (!fruit) return false;
+        const name = fruit.name || '';
+        const rarity = fruit.rarity || '';
+        const type = fruit.type || '';
+        const matchSearch =
+          name.toLowerCase().includes(search.toLowerCase()) ||
+          rarity.toLowerCase().includes(search.toLowerCase()) ||
+          type.toLowerCase().includes(search.toLowerCase());
+        const matchRarity =
+          selectedRarity === 'ALL' ||
+          rarity.toUpperCase() === selectedRarity.toUpperCase();
+        return matchSearch && matchRarity;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'value') return (b.marketValue || 0) - (a.marketValue || 0);
+        if (sortBy === 'demand') return (b.demand || 0) - (a.demand || 0);
+        if (sortBy === 'beli') return (b.beliPrice || 0) - (a.beliPrice || 0);
+        return (a.name || '').localeCompare(b.name || '');
+      });
   }, [fruits, search, selectedRarity, sortBy]);
 
   const rarities = [

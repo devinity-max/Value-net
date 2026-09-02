@@ -1,6 +1,3 @@
-import crestLogo from '../assets/images/valuenet_crest_logo_1788209621725.jpg';
-import heroEmergence from '../assets/images/valuenet_hero_emergence_1788209636759.jpg';
-
 export interface Founder {
   id: string;
   name: 'YAMI' | 'VOID';
@@ -29,8 +26,8 @@ export const BRAND_CONFIG = {
   officialDiscordUrl: 'https://discord.gg/np4sVrpypF',
   discordLabel: 'JOIN DISCORD',
   discordSubtext: 'Join the community beyond VALUE.NET.',
-  logoCrestUrl: crestLogo,
-  heroEmergenceUrl: heroEmergence,
+  logoCrestUrl: '/assets/logo.png',
+  heroEmergenceUrl: '/assets/banner.png',
   disclaimer:
     'VALUE.NET is an independent community platform and trading terminal. It is not affiliated with, endorsed by, or sponsored by Roblox Corporation or Gamer Robot Inc.',
 } as const;
