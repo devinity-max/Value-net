@@ -2516,10 +2516,10 @@ setInterval(() => {
   }
 }, 120000);
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export const app = express();
+const PORT = Number(process.env.PORT) || 3000;
 
+async function startServer() {
   // Ensure asset directories exist on disk
   const ASSETS_FRUITS_DIR = path.join(process.cwd(), 'public/assets/fruits');
   const ASSETS_VARIANTS_DIR = path.join(process.cwd(), 'public/assets/variants');
@@ -7822,9 +7822,15 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`VALUE.NET Live Server running on port ${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`VALUE.NET Live Server running on port ${PORT}`);
+    });
+  }
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
