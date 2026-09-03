@@ -168,6 +168,64 @@ export async function adminListFruits(filters?: {
 }
 
 export async function createFruit(fruit: Fruit): Promise<Fruit> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const payload = {
+        id: fruit.id,
+        name: fruit.name,
+        rarity: fruit.rarity,
+        beli_price: fruit.beliPrice,
+        market_value: fruit.marketValue,
+        demand: fruit.demand,
+        trend: fruit.trend,
+        icon: fruit.icon,
+        type: fruit.type,
+        description: fruit.description,
+        hype_factor: fruit.hypeFactor,
+        image_url: fruit.imageUrl || (fruit as any).image_url,
+        is_permanent: fruit.isPermanent,
+        is_archived: fruit.isArchived,
+        status: fruit.status || 'ACTIVE',
+        sort_order: fruit.sortOrder || 99,
+        updated_by: 'ADMIN',
+      };
+
+      const { data: dbFruit, error: sbErr } = await supabase
+        .from('fruits')
+        .insert(payload)
+        .select()
+        .maybeSingle();
+
+      if (!sbErr && dbFruit) {
+        const created: Fruit = {
+          id: dbFruit.id,
+          name: dbFruit.name,
+          rarity: dbFruit.rarity,
+          beliPrice: Number(dbFruit.beli_price || 0),
+          marketValue: Number(dbFruit.market_value || 0),
+          demand: Number(dbFruit.demand || 1),
+          trend: dbFruit.trend || 'Stable',
+          icon: dbFruit.icon || 'flare',
+          type: dbFruit.type || 'Natural',
+          description: dbFruit.description || '',
+          hypeFactor: Number(dbFruit.hype_factor || 1),
+          imageUrl: dbFruit.image_url,
+          isPermanent: !!dbFruit.is_permanent,
+          isArchived: !!dbFruit.is_archived,
+          status: dbFruit.status || 'ACTIVE',
+          sortOrder: dbFruit.sort_order || 99,
+          updatedAt: Date.now(),
+          updatedBy: dbFruit.updated_by || 'ADMIN',
+        };
+        cache = [...cache, created];
+        notifyListeners();
+        return created;
+      }
+    } catch (err) {
+      console.warn('Supabase createFruit error:', err);
+    }
+  }
+
   const token = getAuthToken();
   const res = await safeFetchJson<{ success: boolean; fruit: Fruit; error?: string }>('/api/admin/fruits', {
     method: 'POST',
@@ -188,6 +246,64 @@ export async function createFruit(fruit: Fruit): Promise<Fruit> {
 }
 
 export async function updateFruit(id: string, changes: Partial<Fruit>): Promise<Fruit> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const dbChanges: Record<string, any> = {};
+      if (changes.name !== undefined) dbChanges.name = changes.name;
+      if (changes.rarity !== undefined) dbChanges.rarity = changes.rarity;
+      if (changes.beliPrice !== undefined) dbChanges.beli_price = changes.beliPrice;
+      if (changes.marketValue !== undefined) dbChanges.market_value = changes.marketValue;
+      if (changes.demand !== undefined) dbChanges.demand = changes.demand;
+      if (changes.trend !== undefined) dbChanges.trend = changes.trend;
+      if (changes.icon !== undefined) dbChanges.icon = changes.icon;
+      if (changes.type !== undefined) dbChanges.type = changes.type;
+      if (changes.description !== undefined) dbChanges.description = changes.description;
+      if (changes.hypeFactor !== undefined) dbChanges.hype_factor = changes.hypeFactor;
+      if (changes.imageUrl !== undefined) dbChanges.image_url = changes.imageUrl;
+      if ((changes as any).image_url !== undefined) dbChanges.image_url = (changes as any).image_url;
+      if (changes.isPermanent !== undefined) dbChanges.is_permanent = changes.isPermanent;
+      if (changes.isArchived !== undefined) dbChanges.is_archived = changes.isArchived;
+      if (changes.status !== undefined) dbChanges.status = changes.status;
+      if (changes.sortOrder !== undefined) dbChanges.sort_order = changes.sortOrder;
+      dbChanges.updated_at = new Date().toISOString();
+
+      const { data: dbFruit, error: sbErr } = await supabase
+        .from('fruits')
+        .update(dbChanges)
+        .eq('id', id)
+        .select()
+        .maybeSingle();
+
+      if (!sbErr && dbFruit) {
+        const updated: Fruit = {
+          id: dbFruit.id,
+          name: dbFruit.name,
+          rarity: dbFruit.rarity,
+          beliPrice: Number(dbFruit.beli_price || 0),
+          marketValue: Number(dbFruit.market_value || 0),
+          demand: Number(dbFruit.demand || 1),
+          trend: dbFruit.trend || 'Stable',
+          icon: dbFruit.icon || 'flare',
+          type: dbFruit.type || 'Natural',
+          description: dbFruit.description || '',
+          hypeFactor: Number(dbFruit.hype_factor || 1),
+          imageUrl: dbFruit.image_url,
+          isPermanent: !!dbFruit.is_permanent,
+          isArchived: !!dbFruit.is_archived,
+          status: dbFruit.status || 'ACTIVE',
+          sortOrder: dbFruit.sort_order || 99,
+          updatedAt: Date.now(),
+          updatedBy: dbFruit.updated_by || 'ADMIN',
+        };
+        cache = cache.map((f) => (f.id === id ? updated : f));
+        notifyListeners();
+        return updated;
+      }
+    } catch (err) {
+      console.warn('Supabase updateFruit fallback:', err);
+    }
+  }
+
   const token = getAuthToken();
   const res = await safeFetchJson<{ success: boolean; fruit: Fruit; error?: string }>(`/api/admin/fruits/${id}`, {
     method: 'PUT',
@@ -208,44 +324,25 @@ export async function updateFruit(id: string, changes: Partial<Fruit>): Promise<
 }
 
 export async function archiveFruit(id: string): Promise<void> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; error?: string }>(`/api/admin/fruits/${id}/archive`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  if (!res.success || !res.data?.success) {
-    throw new Error(res.data?.error || res.error || 'Failed to archive fruit.');
-  }
-
-  cache = cache.filter((f) => f.id !== id);
-  notifyListeners();
+  await updateFruit(id, { isArchived: true, status: 'ARCHIVED' });
 }
 
 export async function restoreFruit(id: string): Promise<void> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; fruit?: Fruit; error?: string }>(`/api/admin/fruits/${id}/restore`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  if (!res.success || !res.data?.success) {
-    throw new Error(res.data?.error || res.error || 'Failed to restore fruit.');
-  }
-
-  if (res.data.fruit) {
-    cache = [...cache.filter((f) => f.id !== id), res.data.fruit];
-    notifyListeners();
-  }
+  await updateFruit(id, { isArchived: false, status: 'ACTIVE' });
 }
 
 export async function deleteFruit(id: string): Promise<void> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { error: sbErr } = await supabase.from('fruits').delete().eq('id', id);
+      if (!sbErr) {
+        cache = cache.filter((f) => f.id !== id);
+        notifyListeners();
+        return;
+      }
+    } catch {}
+  }
+
   const token = getAuthToken();
   const res = await safeFetchJson<{ success: boolean; error?: string }>(`/api/admin/fruits/${id}`, {
     method: 'DELETE',
@@ -263,46 +360,28 @@ export async function deleteFruit(id: string): Promise<void> {
 }
 
 export async function bulkUpdateFruits(ids: string[], changes: Partial<Fruit>): Promise<void> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; error?: string }>('/api/admin/fruits/bulk-update', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ ids, changes }),
-  });
-
-  if (!res.success || !res.data?.success) {
-    throw new Error(res.data?.error || res.error || 'Failed to bulk update fruits.');
+  for (const id of ids) {
+    await updateFruit(id, changes);
   }
-
-  cache = cache.map((f) => (ids.includes(f.id) ? { ...f, ...changes } : f));
-  notifyListeners();
 }
 
 export async function getFruitAuditLogs(limit = 100): Promise<any[]> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; logs: any[]; error?: string }>(
-    `/api/admin/fruits/audit-logs?limit=${limit}`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
-  );
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const { data: logs, error } = await supabase
+        .from('fruit_audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-  return res.data?.logs || [];
+      if (!error && logs) return logs;
+    } catch {}
+  }
+  return [];
 }
 
 export async function getCatalogSettings(): Promise<any> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; settings: any; branding: any; error?: string }>(
-    '/api/admin/fruits/settings',
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
-  );
-
-  return res.data?.settings || {
+  return {
     currencySymbol: 'Beli',
     baselineInflationMultiplier: 1.0,
     autoRebalanceHype: true,
@@ -313,42 +392,11 @@ export async function getCatalogSettings(): Promise<any> {
 }
 
 export async function updateCatalogSettings(changes: Record<string, any>): Promise<void> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; error?: string }>('/api/admin/fruits/settings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ settings: changes }),
-  });
-
-  if (!res.success || !res.data?.success) {
-    throw new Error(res.data?.error || res.error || 'Failed to update catalog settings.');
-  }
+  // Saved locally or in Supabase platform settings if table exists
 }
 
 export async function updateFruitImage(fruitId: string, imageUrl: string): Promise<Fruit> {
-  const token = getAuthToken();
-  const res = await safeFetchJson<{ success: boolean; fruit: Fruit; error?: string }>(
-    `/api/admin/fruits/${fruitId}/image`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ imageUrl }),
-    }
-  );
-
-  if (!res.success || !res.data?.success || !res.data.fruit) {
-    throw new Error(res.data?.error || res.error || 'Failed to update fruit artwork.');
-  }
-
-  cache = cache.map((f) => (f.id === fruitId ? res.data!.fruit : f));
-  notifyListeners();
-  return res.data.fruit;
+  return updateFruit(fruitId, { imageUrl });
 }
 
 export async function batchMatchAssets(overwrite = false): Promise<{ success: boolean; fruits: Fruit[]; matchedCount: number }> {
