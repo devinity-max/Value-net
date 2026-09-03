@@ -9,7 +9,12 @@ export type PermissionAction =
   | 'MANAGE_USERS'
   | 'CONFIGURE_SYSTEM'
   | 'HOST_GIVEAWAYS'
-  | 'CREATE_ADS';
+  | 'CREATE_ADS'
+  | 'ACCESS_MODERATION'
+  | 'ACCESS_ADMIN'
+  | 'ASSIGN_ROLES'
+  | 'BAN_USERS'
+  | 'RESOLVE_REPORTS';
 
 export function isRootOwner(user?: AuthUser | null): boolean {
   if (!user) return false;
@@ -17,7 +22,6 @@ export function isRootOwner(user?: AuthUser | null): boolean {
 }
 
 export const isOwner = isRootOwner;
-
 
 export function isAdmin(user?: AuthUser | null): boolean {
   if (!user) return false;
@@ -34,6 +38,74 @@ export function isApprovedCreator(user?: AuthUser | null): boolean {
   return user.role === 'APPROVED_CREATOR' || isModerator(user);
 }
 
+/** Check if user can host giveaways (CREATOR, MODERATOR, ADMIN, ROOT_OWNER) */
+export function canHostGiveaways(user?: AuthUser | null): boolean {
+  return isApprovedCreator(user);
+}
+
+/** Check if user can access the dedicated Moderation Center (MODERATOR, ADMIN, ROOT_OWNER) */
+export function canAccessModeration(user?: AuthUser | null): boolean {
+  return isModerator(user);
+}
+
+/** Check if user can access the dedicated Admin Control Center (ADMIN, ROOT_OWNER) */
+export function canAccessAdmin(user?: AuthUser | null): boolean {
+  return isAdmin(user);
+}
+
+/** Hierarchy numeric values for staff protection */
+const ROLE_WEIGHT: Record<UserRole, number> = {
+  MEMBER: 0,
+  APPROVED_CREATOR: 1,
+  MODERATOR: 2,
+  ADMIN: 3,
+  ROOT_OWNER: 4,
+};
+
+/**
+ * Validates whether actingUser has authority to moderate targetUser.
+ * Lower staff CANNOT moderate higher staff or equal staff.
+ * Users CANNOT moderate themselves.
+ */
+export function canModerateUser(actingUser?: AuthUser | null, targetUserRole?: UserRole, targetUserId?: string): boolean {
+  if (!actingUser) return false;
+  if (targetUserId && actingUser.id === targetUserId) return false; // Self-target protection
+  if (!isModerator(actingUser)) return false;
+  if (isRootOwner(actingUser)) return true;
+
+  const actingWeight = ROLE_WEIGHT[actingUser.role] || 0;
+  const targetWeight = ROLE_WEIGHT[targetUserRole || 'MEMBER'] || 0;
+
+  return actingWeight > targetWeight;
+}
+
+/**
+ * Validates whether actingUser has authority to assign requestedRole to targetUser.
+ * Rules:
+ * - MEMBER / CREATOR / MODERATOR: CANNOT assign any roles.
+ * - ADMIN: Can assign MEMBER, APPROVED_CREATOR, MODERATOR (CANNOT assign ADMIN or ROOT_OWNER).
+ * - ROOT_OWNER: Can assign any role up to ADMIN or ROOT_OWNER.
+ * - No user can change their own role.
+ */
+export function canAssignRole(actingUser?: AuthUser | null, targetUserRole?: UserRole, requestedRole?: UserRole, targetUserId?: string): boolean {
+  if (!actingUser || !requestedRole) return false;
+  if (targetUserId && actingUser.id === targetUserId) return false; // Self-role change protection
+  if (!isAdmin(actingUser)) return false;
+
+  // Cannot modify ROOT_OWNER
+  if (targetUserRole === 'ROOT_OWNER' && !isRootOwner(actingUser)) return false;
+  if (requestedRole === 'ROOT_OWNER' && !isRootOwner(actingUser)) return false;
+
+  if (isRootOwner(actingUser)) return true;
+
+  // ADMIN can assign MEMBER, APPROVED_CREATOR, MODERATOR
+  if (actingUser.role === 'ADMIN') {
+    return requestedRole === 'MEMBER' || requestedRole === 'APPROVED_CREATOR' || requestedRole === 'MODERATOR';
+  }
+
+  return false;
+}
+
 export function hasPermission(user: AuthUser | null | undefined, action: PermissionAction): boolean {
   if (!user) return false;
   if (isRootOwner(user)) return true;
@@ -45,12 +117,16 @@ export function hasPermission(user: AuthUser | null | undefined, action: Permiss
     case 'MANAGE_FRUITS':
     case 'VIEW_AUDIT_LOGS':
     case 'MANAGE_USERS':
+    case 'ACCESS_ADMIN':
       return isAdmin(user);
     case 'MODERATE_TRADES':
+    case 'ACCESS_MODERATION':
+    case 'BAN_USERS':
+    case 'RESOLVE_REPORTS':
       return isModerator(user);
     case 'MANAGE_GIVEAWAYS':
     case 'HOST_GIVEAWAYS':
-      return isApprovedCreator(user) || isModerator(user);
+      return isApprovedCreator(user);
     case 'CREATE_ADS':
       return true;
     default:

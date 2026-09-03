@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
 import { ActiveTab, AuthUser } from '../types';
 import { BrandLogo } from './brand/BrandLogo';
-import { isRootOwner, isAdmin } from '../utils/permissions';
+import {
+  isRootOwner,
+  isAdmin,
+  isModerator,
+  isApprovedCreator,
+  canAccessModeration,
+  canAccessAdmin,
+  canHostGiveaways,
+} from '../utils/permissions';
 import { getDiscordUrl } from '../utils/brandSettings';
 
 interface NavbarProps {
@@ -26,7 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onViewMyProfile,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [adminDropdownOpen, setAdminDropdownOpen] = useState(false);
+  const [staffDropdownOpen, setStaffDropdownOpen] = useState(false);
   const discordUrl = getDiscordUrl();
 
   const navLinks: { id: ActiveTab; label: string; icon: string }[] = [
@@ -41,10 +49,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   const handleNavClick = (tab: ActiveTab) => {
     setActiveTab(tab);
     setMobileMenuOpen(false);
-    setAdminDropdownOpen(false);
+    setStaffDropdownOpen(false);
   };
 
-  const isOwnerOrAdmin = currentUser && (isRootOwner(currentUser) || isAdmin(currentUser));
+  const showModeration = canAccessModeration(currentUser);
+  const showAdmin = canAccessAdmin(currentUser);
+  const showHost = canHostGiveaways(currentUser);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-[#070913]/90 border-b border-slate-800/80 backdrop-blur-xl">
@@ -75,24 +85,46 @@ export const Navbar: React.FC<NavbarProps> = ({
             );
           })}
 
-          {/* Admin Tools Dropdown */}
-          {isOwnerOrAdmin && (
+          {/* Dedicated Moderation Center Link */}
+          {showModeration && (
+            <button
+              onClick={() => handleNavClick('moderation')}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold font-mono tracking-wider uppercase transition-all cursor-pointer ${
+                activeTab === 'moderation'
+                  ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 shadow-md'
+                  : 'text-indigo-400 hover:bg-indigo-950/40'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">gavel</span>
+              <span>Moderation</span>
+            </button>
+          )}
+
+          {/* Admin Control Suite Dropdown */}
+          {showAdmin && (
             <div className="relative">
               <button
-                onClick={() => setAdminDropdownOpen(!adminDropdownOpen)}
+                onClick={() => setStaffDropdownOpen(!staffDropdownOpen)}
                 className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold font-mono tracking-wider uppercase transition-all cursor-pointer ${
-                  ['owner-control', 'fruit-catalog-admin', 'host-giveaways', 'monetization-admin'].includes(activeTab)
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                    : 'text-rose-400 hover:bg-rose-950/30'
+                  ['owner-control', 'admin', 'fruit-catalog-admin', 'host-giveaways', 'monetization-admin'].includes(activeTab)
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'text-amber-400 hover:bg-amber-950/30'
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px]">admin_panel_settings</span>
-                <span>Staff Suite</span>
+                <span>Admin Suite</span>
                 <span className="material-symbols-outlined text-xs">expand_more</span>
               </button>
 
-              {adminDropdownOpen && (
-                <div className="absolute top-full right-0 mt-2 w-56 rounded-2xl bg-slate-900/95 border border-slate-800 shadow-2xl p-2 backdrop-blur-xl z-50 flex flex-col gap-1">
+              {staffDropdownOpen && (
+                <div className="absolute top-full right-0 mt-2 w-60 rounded-2xl bg-[#0e1224] border border-slate-800 shadow-2xl p-2 backdrop-blur-xl z-50 flex flex-col gap-1">
+                  <button
+                    onClick={() => handleNavClick('admin')}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-left text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-amber-400 text-sm">admin_panel_settings</span>
+                    <span>Admin Control Center</span>
+                  </button>
                   <button
                     onClick={() => handleNavClick('fruit-catalog-admin')}
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-left text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
@@ -100,20 +132,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span className="material-symbols-outlined text-amber-400 text-sm">inventory_2</span>
                     <span>Fruit Catalog Admin</span>
                   </button>
-                  <button
-                    onClick={() => handleNavClick('owner-control')}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-left text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-purple-400 text-sm">tune</span>
-                    <span>Owner Control Deck</span>
-                  </button>
-                  <button
-                    onClick={() => handleNavClick('host-giveaways')}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-left text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-emerald-400 text-sm">redeem</span>
-                    <span>Host Giveaways</span>
-                  </button>
+                  {showHost && (
+                    <button
+                      onClick={() => handleNavClick('host-giveaways')}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-left text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-emerald-400 text-sm">redeem</span>
+                      <span>Host & Creator Drops</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleNavClick('monetization-admin')}
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-left text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
@@ -140,61 +167,41 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Discord</span>
           </a>
 
-          {/* Ledger Jump button */}
-          {onOpenLedger && (
-            <button
-              onClick={onOpenLedger}
-              title="Trade History Ledger"
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-lg">history_edu</span>
-            </button>
-          )}
-
-          {/* API Info Modal */}
-          {onOpenApi && (
-            <button
-              onClick={onOpenApi}
-              title="API & Developers"
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-lg">code</span>
-            </button>
-          )}
-
-          {/* User Profile / Auth Button */}
+          {/* User Profile / Auth Toggle */}
           {currentUser ? (
             <div className="flex items-center gap-2">
               <button
                 onClick={onViewMyProfile}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-500/30 hover:border-amber-500/60 text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#141830] hover:bg-slate-800 border border-slate-700/80 transition-all cursor-pointer"
               >
-                <div className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-mono">
-                  {currentUser.displayName ? currentUser.displayName[0].toUpperCase() : 'U'}
-                </div>
-                <span className="text-white font-mono hidden sm:inline">{currentUser.displayName || currentUser.username}</span>
+                <span className="material-symbols-outlined text-purple-400 text-base">
+                  {currentUser.avatarUrl || 'person'}
+                </span>
+                <span className="text-xs font-bold font-mono text-slate-200 hidden sm:inline">
+                  @{currentUser.username}
+                </span>
               </button>
               <button
                 onClick={onLogout}
-                title="Logout"
-                className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                title="Log Out"
+                className="p-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-400 transition-all cursor-pointer"
               >
-                <span className="material-symbols-outlined text-lg">logout</span>
+                <span className="material-symbols-outlined text-base">logout</span>
               </button>
             </div>
           ) : (
             <button
               onClick={onOpenAuth}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs font-mono tracking-wider uppercase transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-game font-bold text-xs uppercase tracking-wider shadow-lg shadow-purple-600/20 transition-all cursor-pointer active:scale-95"
             >
-              LOGIN / JOIN
+              Log In / Register
             </button>
           )}
 
-          {/* Mobile Menu Button */}
+          {/* Mobile Menu Toggle Button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="xl:hidden p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="xl:hidden p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
           >
             <span className="material-symbols-outlined text-xl">
               {mobileMenuOpen ? 'close' : 'menu'}
@@ -203,51 +210,44 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Mobile Drawer Menu */}
+      {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className="xl:hidden bg-slate-950/95 border-b border-slate-800 px-4 py-4 space-y-2 backdrop-blur-2xl animate-in slide-in-from-top-4">
+        <div className="xl:hidden bg-[#070913] border-b border-slate-800 p-4 space-y-2 animate-in slide-in-from-top-4 duration-200">
           <div className="grid grid-cols-2 gap-2">
-            {navLinks.map((link) => {
-              const isActive = activeTab === link.id;
-              return (
-                <button
-                  key={link.id}
-                  onClick={() => handleNavClick(link.id)}
-                  className={`flex items-center gap-2 p-3 rounded-xl text-xs font-bold font-mono tracking-wider uppercase transition-all ${
-                    isActive
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                      : 'bg-slate-900/80 text-slate-300 border border-slate-800'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-sm">{link.icon}</span>
-                  <span>{link.label}</span>
-                </button>
-              );
-            })}
+            {navLinks.map((link) => (
+              <button
+                key={link.id}
+                onClick={() => handleNavClick(link.id)}
+                className={`flex items-center gap-2 p-3 rounded-xl text-xs font-bold font-mono uppercase tracking-wider ${
+                  activeTab === link.id
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'bg-slate-900/80 text-slate-300 border border-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-base">{link.icon}</span>
+                <span>{link.label}</span>
+              </button>
+            ))}
           </div>
 
-          {isOwnerOrAdmin && (
-            <div className="pt-2 border-t border-slate-800 space-y-1">
-              <div className="text-[10px] font-mono text-rose-400 uppercase font-bold tracking-widest px-1">
-                Admin Suite
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleNavClick('fruit-catalog-admin')}
-                  className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-slate-200"
-                >
-                  <span className="material-symbols-outlined text-amber-400 text-sm">inventory_2</span>
-                  <span>Fruit Catalog</span>
-                </button>
-                <button
-                  onClick={() => handleNavClick('owner-control')}
-                  className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-slate-200"
-                >
-                  <span className="material-symbols-outlined text-purple-400 text-sm">tune</span>
-                  <span>Owner Deck</span>
-                </button>
-              </div>
-            </div>
+          {showModeration && (
+            <button
+              onClick={() => handleNavClick('moderation')}
+              className="w-full flex items-center gap-2 p-3 rounded-xl text-xs font-bold font-mono uppercase tracking-wider bg-indigo-950/60 text-indigo-300 border border-indigo-500/40"
+            >
+              <span className="material-symbols-outlined text-base">gavel</span>
+              <span>Moderation Center</span>
+            </button>
+          )}
+
+          {showAdmin && (
+            <button
+              onClick={() => handleNavClick('admin')}
+              className="w-full flex items-center gap-2 p-3 rounded-xl text-xs font-bold font-mono uppercase tracking-wider bg-amber-950/60 text-amber-300 border border-amber-500/40"
+            >
+              <span className="material-symbols-outlined text-base">admin_panel_settings</span>
+              <span>Admin Control Center</span>
+            </button>
           )}
         </div>
       )}

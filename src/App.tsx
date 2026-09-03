@@ -17,6 +17,7 @@ import { PlayerProfileView } from './components/PlayerProfileView';
 import { EditProfileView } from './components/EditProfileView';
 import { GiveawaysView } from './components/GiveawaysView';
 import { OwnerControlView } from './components/OwnerControlView';
+import { ModerationCenterView } from './components/ModerationCenterView';
 import { HostDashboardView } from './components/HostDashboardView';
 import { FruitCatalogAdminView } from './components/FruitCatalogAdminView';
 import { MonetizationAdminView } from './components/MonetizationAdminView';
@@ -532,7 +533,19 @@ export default function App() {
           </ErrorBoundary>
         )}
 
-        {/* 3.7. ADMIN & OWNER CONTROL CENTER */}
+        {/* 3.7. DEDICATED MODERATION CONTROL CENTER */}
+        {activeTab === 'moderation' && (
+          <ErrorBoundary moduleName="Moderation Center">
+            <ModerationCenterView
+              currentUser={currentUser}
+              onViewTraderProfile={handleViewTraderProfile}
+              onNavigateToTab={setActiveTab}
+              onShowToast={showToast}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* 3.8. ADMIN & OWNER CONTROL CENTER */}
         {(activeTab === 'owner-control' || activeTab === 'admin' || activeTab === 'admin-moderation') && (
           <ErrorBoundary moduleName="Admin Control Center">
             <OwnerControlView

@@ -71,6 +71,7 @@ export type ActiveTab =
   | 'giveaways'
   | 'community'
   | 'host-giveaways'
+  | 'moderation'
   | 'admin-moderation'
   | 'owner-control'
   | 'admin'

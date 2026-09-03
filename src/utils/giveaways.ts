@@ -193,6 +193,13 @@ export async function apiCreateGiveaway(payload: {
   youtubeBoostPercentage?: number;
 }): Promise<{ success: boolean; giveaway?: GiveawayItem; error?: string }> {
   const user = getStoredUser();
+  if (!user || user.role === 'MEMBER') {
+    return {
+      success: false,
+      error: 'Unauthorized: Only Approved Creators, Moderators, Admins, and Owner can host giveaways.',
+    };
+  }
+
   const id = `gw-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
   const createdItem: GiveawayItem = {
