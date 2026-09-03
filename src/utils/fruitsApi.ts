@@ -493,7 +493,31 @@ export async function uploadSingleAsset(
   // On Vercel: upload directly to Supabase Storage
   if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
     const BUCKET = 'fruit-assets';
-    const storagePath = `fruits/${fruitId || file.name.replace(/\.[^.]+$/, '')}/${file.name}`;
+
+    // Auto-match target fruit ID if not explicitly passed
+    let targetFruitId = fruitId;
+    if (!targetFruitId) {
+      const cleanName = file.name
+        .replace(/\.[^.]+$/, '') // remove extension
+        .replace(/^\d+[-_\s]*/, '') // remove leading digits e.g. "462842-kitsune" -> "kitsune"
+        .toLowerCase()
+        .trim();
+
+      const currentFruits = cache.length > 0 ? cache : BLOX_FRUITS_DATA;
+      const matched = currentFruits.find((f) => {
+        const fid = f.id.toLowerCase();
+        const fname = f.name.toLowerCase();
+        const fclean = fname.replace(/[^a-z0-9]/g, '');
+        const cclean = cleanName.replace(/[^a-z0-9]/g, '');
+        return fid === cclean || cclean.includes(fid) || fid.includes(cclean) || cclean === fclean;
+      });
+
+      if (matched) {
+        targetFruitId = matched.id;
+      }
+    }
+
+    const storagePath = `fruits/${targetFruitId || file.name.replace(/\.[^.]+$/, '')}/${file.name}`;
 
     // Try upload — if bucket doesn't exist, create it first then retry
     let uploadErr: any = null;
@@ -502,7 +526,6 @@ export async function uploadSingleAsset(
       .upload(storagePath, file, { upsert: true, contentType: file.type });
 
     if (uploadResult.error && uploadResult.error.message?.toLowerCase().includes('bucket')) {
-      // Create the bucket as public, then retry
       await supabase.storage.createBucket(BUCKET, { public: true });
       uploadResult = await supabase.storage
         .from(BUCKET)
@@ -517,40 +540,63 @@ export async function uploadSingleAsset(
     const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
     const publicUrl = publicUrlData?.publicUrl || '';
 
-    // If a fruitId is specified, update the fruit's image_url in the database
-    if (fruitId && publicUrl) {
+    // If a target fruit ID was identified, update the fruit's image_url in Supabase DB
+    if (targetFruitId && publicUrl) {
       const { data: updatedFruit } = await supabase
         .from('fruits')
         .update({ image_url: publicUrl })
-        .eq('id', fruitId)
+        .eq('id', targetFruitId)
         .select()
         .maybeSingle();
 
-      if (updatedFruit) {
-        const mapped: Fruit = {
-          id: updatedFruit.id,
-          name: updatedFruit.name,
-          rarity: updatedFruit.rarity,
-          beliPrice: Number(updatedFruit.beli_price || 0),
-          marketValue: Number(updatedFruit.market_value || 0),
-          demand: Number(updatedFruit.demand || 1),
-          trend: updatedFruit.trend || 'Stable',
-          icon: updatedFruit.icon || 'flare',
-          type: updatedFruit.type || 'Natural',
-          description: updatedFruit.description || '',
-          hypeFactor: Number(updatedFruit.hype_factor || 1),
-          imageUrl: publicUrl,
-          isPermanent: !!updatedFruit.is_permanent,
-          isArchived: !!updatedFruit.is_archived,
-          status: updatedFruit.status || 'ACTIVE',
-          sortOrder: updatedFruit.sort_order || 99,
-          updatedAt: Date.now(),
-          updatedBy: 'ADMIN',
-        };
-        cache = cache.map((f) => (f.id === fruitId ? mapped : f));
-        notifyListeners();
-        return { success: true, path: publicUrl, matchedFruit: mapped };
-      }
+      const matchedInCache = cache.find((f) => f.id === targetFruitId);
+      const mapped: Fruit = updatedFruit
+        ? {
+            id: updatedFruit.id,
+            name: updatedFruit.name,
+            rarity: updatedFruit.rarity,
+            beliPrice: Number(updatedFruit.beli_price || 0),
+            marketValue: Number(updatedFruit.market_value || 0),
+            demand: Number(updatedFruit.demand || 1),
+            trend: updatedFruit.trend || 'Stable',
+            icon: updatedFruit.icon || 'flare',
+            type: updatedFruit.type || 'Natural',
+            description: updatedFruit.description || '',
+            hypeFactor: Number(updatedFruit.hype_factor || 1),
+            imageUrl: publicUrl,
+            isPermanent: !!updatedFruit.is_permanent,
+            isArchived: !!updatedFruit.is_archived,
+            status: updatedFruit.status || 'ACTIVE',
+            sortOrder: updatedFruit.sort_order || 99,
+            updatedAt: Date.now(),
+            updatedBy: 'ADMIN',
+          }
+        : matchedInCache
+        ? { ...matchedInCache, imageUrl: publicUrl }
+        : {
+            id: targetFruitId,
+            name: targetFruitId,
+            rarity: 'Common',
+            beliPrice: 0,
+            marketValue: 0,
+            demand: 1,
+            trend: 'Stable',
+            icon: 'flare',
+            type: 'Natural',
+            description: '',
+            hypeFactor: 1,
+            imageUrl: publicUrl,
+            isPermanent: false,
+            isArchived: false,
+            status: 'ACTIVE',
+            sortOrder: 99,
+            updatedAt: Date.now(),
+            updatedBy: 'ADMIN',
+          };
+
+      cache = cache.map((f) => (f.id === targetFruitId ? mapped : f));
+      notifyListeners();
+      return { success: true, path: publicUrl, matchedFruit: mapped };
     }
 
     return { success: true, path: publicUrl };
