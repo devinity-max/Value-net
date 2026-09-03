@@ -42,7 +42,7 @@ export async function apiGetGiveaways(params?: {
         id: gw.id,
         hostId: gw.host_id,
         hostName: gw.host_name,
-        hostDisplayName: gw.host_display_name,
+        hostDisplayName: gw.host_display_name || gw.host_name,
         hostAvatar: gw.host_avatar || 'person',
         hostTitle: gw.host_title || 'host',
         hostRole: gw.host_role || 'MEMBER',
@@ -140,7 +140,7 @@ export async function apiGetGiveaway(id: string): Promise<{
           id: gw.id,
           hostId: gw.host_id,
           hostName: gw.host_name,
-          hostDisplayName: gw.host_display_name,
+          hostDisplayName: gw.host_display_name || gw.host_name,
           hostAvatar: gw.host_avatar || 'person',
           hostTitle: gw.host_title || 'host',
           hostRole: gw.host_role || 'MEMBER',
@@ -199,7 +199,7 @@ export async function apiCreateGiveaway(payload: {
     id,
     hostId: user?.id || 'devness',
     hostName: user?.username || 'devness',
-    hostDisplayName: user?.displayName || 'devness',
+    hostDisplayName: user?.displayName || user?.username || 'devness',
     hostAvatar: user?.avatarUrl || 'person',
     hostTitle: 'ROOT_OWNER',
     hostRole: user?.role || 'ROOT_OWNER',
@@ -227,25 +227,24 @@ export async function apiCreateGiveaway(payload: {
   localGiveawaysCache = [createdItem, ...localGiveawaysCache];
   saveStoredLocalGiveaways(localGiveawaysCache);
 
-  // 2. Try inserting into Supabase DB
+  // 2. Insert into Supabase DB (with JSON stringification for PostgreSQL compatibility)
   try {
-    const dbPayload = {
+    const dbPayload: Record<string, any> = {
       id,
       host_id: user?.id || 'devness',
       host_name: user?.username || 'devness',
-      host_display_name: user?.displayName || 'devness',
+      host_display_name: user?.displayName || user?.username || 'devness',
       host_avatar: user?.avatarUrl || 'person',
-      host_title: 'ROOT_OWNER',
-      host_role: user?.role || 'ROOT_OWNER',
       title: payload.title,
       description: payload.description || '',
-      prizes: payload.prizes || [],
-      rules: payload.rules || [],
-      eligibility: payload.eligibility || {},
+      prizes: JSON.stringify(payload.prizes || []),
+      rules: JSON.stringify(payload.rules || []),
+      eligibility: JSON.stringify(payload.eligibility || {}),
       status: payload.status || 'ACTIVE',
       starts_at: payload.startsAt ? new Date(payload.startsAt).toISOString() : new Date().toISOString(),
       ends_at: payload.endsAt ? new Date(payload.endsAt).toISOString() : new Date(Date.now() + 86400000).toISOString(),
       max_participants: payload.maxParticipants || null,
+      participant_count: 0,
       allow_leave: payload.allowLeave ?? true,
       youtube_boost_enabled: !!payload.youtubeBoostEnabled,
       youtube_video_id: payload.youtubeVideoId || null,
@@ -258,7 +257,9 @@ export async function apiCreateGiveaway(payload: {
       .select()
       .maybeSingle();
 
-    if (!sbErr && dbGw) {
+    if (sbErr) {
+      console.warn('Supabase createGiveaway insert error:', sbErr.message);
+    } else if (dbGw) {
       const dbCreated: GiveawayItem = {
         ...createdItem,
         id: dbGw.id,
@@ -303,9 +304,9 @@ export async function apiUpdateGiveaway(
     const dbChanges: Record<string, any> = {};
     if (payload.title !== undefined) dbChanges.title = payload.title;
     if (payload.description !== undefined) dbChanges.description = payload.description;
-    if (payload.prizes !== undefined) dbChanges.prizes = payload.prizes;
-    if (payload.rules !== undefined) dbChanges.rules = payload.rules;
-    if (payload.eligibility !== undefined) dbChanges.eligibility = payload.eligibility;
+    if (payload.prizes !== undefined) dbChanges.prizes = JSON.stringify(payload.prizes);
+    if (payload.rules !== undefined) dbChanges.rules = JSON.stringify(payload.rules);
+    if (payload.eligibility !== undefined) dbChanges.eligibility = JSON.stringify(payload.eligibility);
     if (payload.status !== undefined) dbChanges.status = payload.status;
     if (payload.startsAt !== undefined) dbChanges.starts_at = new Date(payload.startsAt).toISOString();
     if (payload.endsAt !== undefined) dbChanges.ends_at = new Date(payload.endsAt).toISOString();
@@ -328,10 +329,10 @@ export async function apiUpdateGiveaway(
         id: dbGw.id,
         hostId: dbGw.host_id,
         hostName: dbGw.host_name,
-        hostDisplayName: dbGw.host_display_name,
-        hostAvatar: dbGw.host_avatar,
-        hostTitle: dbGw.host_title,
-        hostRole: dbGw.host_role,
+        hostDisplayName: dbGw.host_display_name || dbGw.host_name,
+        hostAvatar: dbGw.host_avatar || 'person',
+        hostTitle: dbGw.host_title || 'host',
+        hostRole: dbGw.host_role || 'MEMBER',
         hostBadges: [],
         title: dbGw.title,
         description: dbGw.description,
