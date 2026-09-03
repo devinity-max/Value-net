@@ -1,5 +1,3 @@
-import { fetchApi } from './apiHelper';
-
 export interface SystemHealthMetrics {
   loadState: 'NORMAL' | 'ELEVATED' | 'CRITICAL';
   isEmergencyMode: boolean;
@@ -18,10 +16,6 @@ export interface SystemHealthMetrics {
 }
 
 export async function apiGetSystemHealth(): Promise<{ success: boolean; health?: SystemHealthMetrics; error?: string }> {
-  const res = await fetchApi<{ health: SystemHealthMetrics }>('/api/system/health');
-  if (res.success && res.health) {
-    return { success: true, health: res.health as SystemHealthMetrics };
-  }
   return {
     success: true,
     health: {
