@@ -27,6 +27,8 @@ import { GuidelinesView } from './components/GuidelinesView';
 import { SafetyView } from './components/SafetyView';
 import { ContactView } from './components/ContactView';
 import { SecurityView } from './components/SecurityView';
+import { AdvertiseView } from './components/AdvertiseView';
+import { SupportView } from './components/SupportView';
 import { NotFoundView } from './components/NotFoundView';
 import { CommunityView } from './components/CommunityView';
 import { FoundersSection } from './components/brand/FoundersSection';
@@ -667,6 +669,28 @@ export default function App() {
         {activeTab === 'security' && (
           <ErrorBoundary moduleName="Security Disclosure">
             <SecurityView onNavigateTab={setActiveTab} />
+          </ErrorBoundary>
+        )}
+
+        {/* 13. ADVERTISE WITH US */}
+        {activeTab === 'advertise' && (
+          <ErrorBoundary moduleName="Advertise With Us">
+            <AdvertiseView
+              currentUser={currentUser}
+              onNavigateTab={setActiveTab}
+              onShowToast={showToast}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* 14. SUPPORT PLATFORM */}
+        {activeTab === 'support' && (
+          <ErrorBoundary moduleName="Support Platform">
+            <SupportView
+              currentUser={currentUser}
+              onNavigateTab={setActiveTab}
+              onShowToast={showToast}
+            />
           </ErrorBoundary>
         )}
       </main>

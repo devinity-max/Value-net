@@ -10,6 +10,7 @@ import {
 } from '../utils/giveaways';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
+import { canHostGiveaways } from '../utils/permissions';
 import { FruitImage } from './FruitImage';
 import { ParticipantsModal } from './ParticipantsModal';
 
@@ -320,6 +321,32 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
           >
             Sign In to Continue
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canHostGiveaways(currentUser)) {
+    return (
+      <div className="pt-28 sm:pt-32 pb-20 px-4 max-w-4xl mx-auto text-center space-y-6">
+        <div className="bg-rose-950/80 border-2 border-rose-500/80 p-8 sm:p-12 rounded-3xl shadow-2xl backdrop-blur-xl space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center mx-auto text-rose-400">
+            <span className="material-symbols-outlined text-3xl">shield_lock</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-game font-black text-white uppercase tracking-wider">
+            403 — Host Clearance Required
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto font-sans">
+            Hosting community giveaways requires <strong>APPROVED_CREATOR</strong> clearance or higher. Standard <strong>MEMBER</strong> accounts can participate in all active giveaways but cannot launch drops.
+          </p>
+          {onNavigateToTab && (
+            <button
+              onClick={() => onNavigateToTab('giveaways')}
+              className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-game text-xs font-bold uppercase transition-all shadow-lg cursor-pointer"
+            >
+              Browse Active Community Giveaways
+            </button>
+          )}
         </div>
       </div>
     );

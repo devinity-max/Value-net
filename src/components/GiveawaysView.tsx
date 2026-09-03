@@ -9,6 +9,7 @@ import {
 } from '../utils/giveaways';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
+import { canHostGiveaways } from '../utils/permissions';
 import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
 import { ParticipantsModal } from './ParticipantsModal';
@@ -177,8 +178,8 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
         {/* Action / Search & Host Button */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          {/* Host Giveaway Trigger */}
-          {onNavigateToTab && (
+          {/* Host Giveaway Trigger - Restricted to Creator+ */}
+          {onNavigateToTab && canHostGiveaways(currentUser) && (
             <button
               onClick={() => {
                 playClickSound();
@@ -246,9 +247,9 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
           <span className="material-symbols-outlined text-4xl text-slate-600">redeem</span>
           <h3 className="font-game font-bold text-base text-white">No Giveaways Found</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            There are currently no active giveaways in this view. Check back soon or host your own verified drop!
+            There are currently no active giveaways in this view. Check back soon for official community drops!
           </p>
-          {onNavigateToTab && (
+          {onNavigateToTab && canHostGiveaways(currentUser) && (
             <button
               onClick={() => onNavigateToTab('host-giveaways')}
               className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-game text-xs uppercase"
