@@ -492,16 +492,29 @@ export async function uploadSingleAsset(
 ): Promise<{ success: boolean; path: string; matchedFruit?: Fruit; assets?: DiskAssetItem[] }> {
   // On Vercel: upload directly to Supabase Storage
   if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    const BUCKET = 'fruit-assets';
     const storagePath = `fruits/${fruitId || file.name.replace(/\.[^.]+$/, '')}/${file.name}`;
-    const { data: uploadData, error: uploadErr } = await supabase.storage
-      .from('fruit-assets')
+
+    // Try upload — if bucket doesn't exist, create it first then retry
+    let uploadErr: any = null;
+    let uploadResult = await supabase.storage
+      .from(BUCKET)
       .upload(storagePath, file, { upsert: true, contentType: file.type });
 
+    if (uploadResult.error && uploadResult.error.message?.toLowerCase().includes('bucket')) {
+      // Create the bucket as public, then retry
+      await supabase.storage.createBucket(BUCKET, { public: true });
+      uploadResult = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, file, { upsert: true, contentType: file.type });
+    }
+
+    uploadErr = uploadResult.error;
     if (uploadErr) {
       throw new Error(uploadErr.message || 'Failed to upload to Supabase Storage.');
     }
 
-    const { data: publicUrlData } = supabase.storage.from('fruit-assets').getPublicUrl(storagePath);
+    const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
     const publicUrl = publicUrlData?.publicUrl || '';
 
     // If a fruitId is specified, update the fruit's image_url in the database

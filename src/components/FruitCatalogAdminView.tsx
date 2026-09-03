@@ -289,7 +289,12 @@ export const FruitCatalogAdminView: React.FC<FruitCatalogAdminViewProps> = ({
       }
       setTimeout(() => setSuccessNotice(null), 5000);
     } catch (err: any) {
-      setErrorNotice(err.message || 'Failed to upload and extract ZIP file.');
+      const msg: string = err?.message || '';
+      if (msg.toLowerCase().includes('bucket')) {
+        setErrorNotice('⚠️ Storage bucket not set up yet. Please go to your Supabase dashboard → Storage → Create a new bucket named "fruit-assets" (set it to Public). Then try uploading again.');
+      } else {
+        setErrorNotice(msg || 'Failed to upload and extract ZIP file.');
+      }
     } finally {
       setUploadingZip(false);
       if (zipInputRef.current) zipInputRef.current.value = '';
@@ -362,7 +367,12 @@ export const FruitCatalogAdminView: React.FC<FruitCatalogAdminViewProps> = ({
         setUploadProgressText(null);
       }, 4500);
     } catch (err: any) {
-      setErrorNotice(err.message || 'Failed to upload image file(s).');
+      const msg: string = err?.message || '';
+      if (msg.toLowerCase().includes('bucket')) {
+        setErrorNotice('⚠️ Storage not set up. Go to Supabase Dashboard → Storage → New Bucket → name it "fruit-assets" → toggle Public ON → Save. Then re-upload.');
+      } else {
+        setErrorNotice(msg || 'Failed to upload image file(s).');
+      }
     } finally {
       setUploadingFile(false);
       setDirectUploadFruitTarget(null);
