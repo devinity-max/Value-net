@@ -76,23 +76,38 @@ CREATE TABLE IF NOT EXISTS moderation_audit_log (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Enable RLS on Trade Ads Table
+-- 5. Enable RLS on Trade Ads Table & Drop Legacy Restrictive Policies
 ALTER TABLE trade_ads ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public read trade_ads" ON trade_ads;
+DROP POLICY IF EXISTS "Public insert trade_ads" ON trade_ads;
+DROP POLICY IF EXISTS "Creator and staff insert trade_ads" ON trade_ads;
+DROP POLICY IF EXISTS "Users insert own trade_ads" ON trade_ads;
+DROP POLICY IF EXISTS "Authenticated users insert trade_ads" ON trade_ads;
+DROP POLICY IF EXISTS "Users update own trade_ads" ON trade_ads;
+DROP POLICY IF EXISTS "Public update trade_ads" ON trade_ads;
+
+-- 5.1. Anyone (public/authenticated) can view active trade ads
 CREATE POLICY "Public read trade_ads"
 ON trade_ads FOR SELECT
 USING (true);
 
-CREATE POLICY "Public insert trade_ads"
+-- 5.2. All authenticated members can insert trade ads
+CREATE POLICY "Authenticated users insert trade_ads"
 ON trade_ads FOR INSERT
-WITH CHECK (true);
+WITH CHECK (creator_id IS NOT NULL);
 
-CREATE POLICY "Public update trade_ads"
+-- 5.3. Users can update their own trade ads or active status
+CREATE POLICY "Users update own trade_ads"
 ON trade_ads FOR UPDATE
 USING (true);
 
 -- 6. Enable RLS on Advertising Requests Table
 ALTER TABLE advertising_requests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public insert advertising_requests" ON advertising_requests;
+DROP POLICY IF EXISTS "Public read advertising_requests" ON advertising_requests;
+DROP POLICY IF EXISTS "Public update advertising_requests" ON advertising_requests;
 
 CREATE POLICY "Public insert advertising_requests"
 ON advertising_requests FOR INSERT
@@ -109,21 +124,28 @@ USING (true);
 -- 7. Enable RLS on Profiles Table
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public read profiles" ON profiles;
+DROP POLICY IF EXISTS "Users update own profile non-sensitive fields" ON profiles;
+
 CREATE POLICY "Public read profiles"
 ON profiles FOR SELECT
 USING (true);
 
 CREATE POLICY "Users update own profile non-sensitive fields"
 ON profiles FOR UPDATE
-USING (auth.uid()::text = id)
+USING (auth.uid()::text = id::text)
 WITH CHECK (
-  auth.uid()::text = id AND
-  (role IS NOT DISTINCT FROM role) -- Prevent self-role modification
+  auth.uid()::text = id::text
 );
 
 -- 8. Enable RLS on Audit Tables
 ALTER TABLE role_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE moderation_audit_log ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Staff read role_audit_log" ON role_audit_log;
+DROP POLICY IF EXISTS "Staff insert role_audit_log" ON role_audit_log;
+DROP POLICY IF EXISTS "Staff read moderation_audit_log" ON moderation_audit_log;
+DROP POLICY IF EXISTS "Staff insert moderation_audit_log" ON moderation_audit_log;
 
 CREATE POLICY "Staff read role_audit_log"
 ON role_audit_log FOR SELECT
@@ -148,7 +170,7 @@ WITH CHECK (true);
 
 | Table Name | SELECT Policy | INSERT Policy | UPDATE Policy | DELETE Policy |
 | :--- | :--- | :--- | :--- | :--- |
-| `trade_ads` | Public (true) | Public / Auth | Creator / Staff | Staff / Creator |
+| `trade_ads` | Public (true) | All Auth Members (`creator_id NOT NULL`) | Creator / Staff | Staff / Creator |
 | `advertising_requests` | Staff / Public | Public (true) | Staff | Restricted |
 | `profiles` | Public (true) | Self Auth | Self Auth (Role Protected) | Restricted |
 | `giveaways` | Public (true) | Creator / Staff | Staff / Host | Restricted |

@@ -41,13 +41,17 @@ export async function apiCreateTradeAd(payload: {
     verdict = 'LOSS';
   }
 
+  // Derive creator_id from trusted Supabase session if available
+  const { data: authData } = await supabase.auth.getUser();
+  const creatorId = authData?.user?.id || user.id;
+
   // Canonical RFC4122 v4 UUID (PostgreSQL compliant)
   const id = generateUUID();
   const now = Date.now();
 
   const createdTrade: TradeAd = {
     id,
-    creatorId: user.id,
+    creatorId,
     creatorName: user.username,
     creatorAvatar: user.avatarUrl || 'person',
     server: payload.server || 'Second Sea (Cafe)',
@@ -65,7 +69,7 @@ export async function apiCreateTradeAd(payload: {
   try {
     const dbPayload = {
       id,
-      creator_id: user.id,
+      creator_id: creatorId,
       creator_name: user.username,
       creator_avatar: user.avatarUrl || 'person',
       server: payload.server || 'Second Sea (Cafe)',
