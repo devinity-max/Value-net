@@ -2,6 +2,8 @@ import { GiveawayItem, GiveawayEntry, GiveawayReport, GiveawayStatus } from '../
 import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
 
+let localGiveawaysCache: GiveawayItem[] = [];
+
 export async function apiGetGiveaways(params?: {
   filter?: string;
   search?: string;
@@ -10,6 +12,8 @@ export async function apiGetGiveaways(params?: {
   page?: number;
   limit?: number;
 }): Promise<{ success: boolean; giveaways: GiveawayItem[]; total?: number; error?: string }> {
+  let list: GiveawayItem[] = [];
+
   try {
     let query = supabase.from('giveaways').select('*').order('created_at', { ascending: false });
     if (params?.hostId) {
@@ -17,8 +21,8 @@ export async function apiGetGiveaways(params?: {
     }
     const { data: dbGiveaways, error: sbErr } = await query;
 
-    if (!sbErr && dbGiveaways) {
-      const formatted: GiveawayItem[] = dbGiveaways.map((gw: any) => ({
+    if (!sbErr && dbGiveaways && dbGiveaways.length > 0) {
+      list = dbGiveaways.map((gw: any) => ({
         id: gw.id,
         hostId: gw.host_id,
         hostName: gw.host_name,
@@ -50,18 +54,50 @@ export async function apiGetGiveaways(params?: {
         youtubeBoostPercentage: Number(gw.youtube_boost_percentage || 0),
         youtubeRedemptionCount: Number(gw.youtube_redemption_count || 0),
       }));
-
-      return {
-        success: true,
-        giveaways: formatted,
-        total: formatted.length,
-      };
     }
   } catch (err) {
     console.warn('Supabase giveaways fetch error:', err);
   }
 
-  return { success: true, giveaways: [], total: 0 };
+  // Combine with local in-memory cache (deduplicate by ID)
+  const map = new Map<string, GiveawayItem>();
+  localGiveawaysCache.forEach((g) => map.set(g.id, g));
+  list.forEach((g) => map.set(g.id, g));
+
+  let combined = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+
+  // Filter by hostId
+  if (params?.hostId) {
+    combined = combined.filter((g) => g.hostId === params.hostId);
+  }
+
+  // Filter by status filter
+  const f = params?.filter;
+  if (f === 'ACTIVE') {
+    combined = combined.filter((g) => g.status === 'ACTIVE' || g.status === 'DRAFT' || g.status === 'SCHEDULED');
+  } else if (f === 'ENDED') {
+    combined = combined.filter((g) => g.status === 'ENDED' || g.status === 'COMPLETED' || g.status === 'CANCELLED');
+  } else if (f?.startsWith('user:')) {
+    const uid = f.split('user:')[1];
+    combined = combined.filter((g) => g.hostId === uid);
+  }
+
+  // Filter by search
+  if (params?.search) {
+    const q = params.search.toLowerCase();
+    combined = combined.filter(
+      (g) =>
+        g.title.toLowerCase().includes(q) ||
+        g.description.toLowerCase().includes(q) ||
+        g.hostName.toLowerCase().includes(q)
+    );
+  }
+
+  return {
+    success: true,
+    giveaways: combined,
+    total: combined.length,
+  };
 }
 
 export async function apiGetGiveaway(id: string): Promise<{
@@ -69,6 +105,11 @@ export async function apiGetGiveaway(id: string): Promise<{
   giveaway?: GiveawayItem;
   error?: string;
 }> {
+  const localMatch = localGiveawaysCache.find((g) => g.id === id);
+  if (localMatch) {
+    return { success: true, giveaway: localMatch };
+  }
+
   try {
     const { data: gw, error: sbErr } = await supabase
       .from('giveaways')
@@ -135,79 +176,11 @@ export async function apiCreateGiveaway(payload: {
   youtubeSecretCode?: string;
   youtubeBoostPercentage?: number;
 }): Promise<{ success: boolean; giveaway?: GiveawayItem; error?: string }> {
-  try {
-    const user = getStoredUser();
-    const id = `gw-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-
-    const dbPayload = {
-      id,
-      host_id: user?.id || 'devness',
-      host_name: user?.username || 'devness',
-      host_display_name: user?.displayName || 'devness',
-      host_avatar: user?.avatarUrl || 'person',
-      host_title: 'ROOT_OWNER',
-      host_role: user?.role || 'ROOT_OWNER',
-      title: payload.title,
-      description: payload.description || '',
-      prizes: payload.prizes || [],
-      rules: payload.rules || [],
-      eligibility: payload.eligibility || {},
-      status: (payload.status || 'ACTIVE') as GiveawayStatus,
-      starts_at: payload.startsAt ? new Date(payload.startsAt).toISOString() : new Date().toISOString(),
-      ends_at: payload.endsAt ? new Date(payload.endsAt).toISOString() : new Date(Date.now() + 86400000).toISOString(),
-      max_participants: payload.maxParticipants || null,
-      allow_leave: payload.allowLeave ?? true,
-      youtube_boost_enabled: !!payload.youtubeBoostEnabled,
-      youtube_video_id: payload.youtubeVideoId || null,
-      youtube_boost_percentage: payload.youtubeBoostPercentage || 10,
-    };
-
-    const { data: dbGw, error: sbErr } = await supabase
-      .from('giveaways')
-      .insert(dbPayload)
-      .select()
-      .maybeSingle();
-
-    if (!sbErr && dbGw) {
-      const created: GiveawayItem = {
-        id: dbGw.id,
-        hostId: dbGw.host_id,
-        hostName: dbGw.host_name,
-        hostDisplayName: dbGw.host_display_name,
-        hostAvatar: dbGw.host_avatar,
-        hostTitle: dbGw.host_title,
-        hostRole: dbGw.host_role,
-        hostBadges: [],
-        title: dbGw.title,
-        description: dbGw.description,
-        prizes: typeof dbGw.prizes === 'string' ? JSON.parse(dbGw.prizes) : (dbGw.prizes || []),
-        rules: typeof dbGw.rules === 'string' ? JSON.parse(dbGw.rules) : (dbGw.rules || []),
-        eligibility: typeof dbGw.eligibility === 'string' ? JSON.parse(dbGw.eligibility) : (dbGw.eligibility || {}),
-        status: (dbGw.status || 'ACTIVE') as GiveawayStatus,
-        startsAt: new Date(dbGw.starts_at).getTime(),
-        endsAt: new Date(dbGw.ends_at).getTime(),
-        maxParticipants: dbGw.max_participants,
-        participantCount: 0,
-        allowLeave: dbGw.allow_leave,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        youtubeBoostEnabled: !!dbGw.youtube_boost_enabled,
-        youtubeVideoId: dbGw.youtube_video_id,
-        youtubeBoostPercentage: Number(dbGw.youtube_boost_percentage || 0),
-        youtubeRedemptionCount: 0,
-      };
-      return { success: true, giveaway: created };
-    } else if (sbErr) {
-      console.warn('Supabase createGiveaway error:', sbErr.message);
-    }
-  } catch (err: any) {
-    console.warn('Supabase createGiveaway fallback error:', err);
-  }
-
-  // Local fallback
   const user = getStoredUser();
-  const fallbackItem: GiveawayItem = {
-    id: `gw-${Date.now()}`,
+  const id = `gw-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+  const createdItem: GiveawayItem = {
+    id,
     hostId: user?.id || 'devness',
     hostName: user?.username || 'devness',
     hostDisplayName: user?.displayName || 'devness',
@@ -234,7 +207,53 @@ export async function apiCreateGiveaway(payload: {
     youtubeRedemptionCount: 0,
   };
 
-  return { success: true, giveaway: fallbackItem };
+  // 1. Immediately cache in local memory so it shows instantly everywhere
+  localGiveawaysCache = [createdItem, ...localGiveawaysCache];
+
+  // 2. Persist in Supabase DB
+  try {
+    const dbPayload = {
+      id,
+      host_id: user?.id || 'devness',
+      host_name: user?.username || 'devness',
+      host_display_name: user?.displayName || 'devness',
+      host_avatar: user?.avatarUrl || 'person',
+      host_title: 'ROOT_OWNER',
+      host_role: user?.role || 'ROOT_OWNER',
+      title: payload.title,
+      description: payload.description || '',
+      prizes: payload.prizes || [],
+      rules: payload.rules || [],
+      eligibility: payload.eligibility || {},
+      status: payload.status || 'ACTIVE',
+      starts_at: payload.startsAt ? new Date(payload.startsAt).toISOString() : new Date().toISOString(),
+      ends_at: payload.endsAt ? new Date(payload.endsAt).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+      max_participants: payload.maxParticipants || null,
+      allow_leave: payload.allowLeave ?? true,
+      youtube_boost_enabled: !!payload.youtubeBoostEnabled,
+      youtube_video_id: payload.youtubeVideoId || null,
+      youtube_boost_percentage: payload.youtubeBoostPercentage || 10,
+    };
+
+    const { data: dbGw, error: sbErr } = await supabase
+      .from('giveaways')
+      .insert(dbPayload)
+      .select()
+      .maybeSingle();
+
+    if (!sbErr && dbGw) {
+      const dbCreated: GiveawayItem = {
+        ...createdItem,
+        id: dbGw.id,
+      };
+      localGiveawaysCache = localGiveawaysCache.map((g) => (g.id === id ? dbCreated : g));
+      return { success: true, giveaway: dbCreated };
+    }
+  } catch (err: any) {
+    console.warn('Supabase createGiveaway fallback:', err);
+  }
+
+  return { success: true, giveaway: createdItem };
 }
 
 export async function apiUpdateGiveaway(
@@ -257,6 +276,11 @@ export async function apiUpdateGiveaway(
     youtubeBoostPercentage: number;
   }>
 ): Promise<{ success: boolean; giveaway?: GiveawayItem; error?: string }> {
+  // Update local cache
+  localGiveawaysCache = localGiveawaysCache.map((g) =>
+    g.id === id ? { ...g, ...payload, status: (payload.status || g.status) as GiveawayStatus } : g
+  );
+
   try {
     const dbChanges: Record<string, any> = {};
     if (payload.title !== undefined) dbChanges.title = payload.title;
