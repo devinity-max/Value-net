@@ -1,6 +1,6 @@
 # VALUE.NET — Supabase Database Migration & RLS Audit
 
-This document provides safe, non-destructive incremental SQL migrations for Supabase to enforce Row Level Security (RLS) on all user, giveaway, report, advertising, and audit tables.
+This document provides safe, non-destructive incremental SQL migrations for Supabase to enforce Row Level Security (RLS) on all user, giveaway, trade ad, report, advertising, and audit tables.
 
 ---
 
@@ -9,36 +9,28 @@ This document provides safe, non-destructive incremental SQL migrations for Supa
 Run this script once in your **[Supabase SQL Editor](https://supabase.com/dashboard)** (Project ID: `qvqhysrfwdgfsjdwodfh`):
 
 ```sql
--- 1. Create Role Audit Log Table (Append-only)
-CREATE TABLE IF NOT EXISTS role_audit_log (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  actor_user_id TEXT NOT NULL,
-  actor_username TEXT NOT NULL,
-  actor_role TEXT NOT NULL,
-  target_user_id TEXT NOT NULL,
-  target_username TEXT NOT NULL,
-  action TEXT NOT NULL,
-  previous_role TEXT,
-  new_role TEXT,
-  reason TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+-- 1. Create Trade Ads Table
+CREATE TABLE IF NOT EXISTS trade_ads (
+  id TEXT PRIMARY KEY,
+  creator_id TEXT NOT NULL,
+  creator_name TEXT NOT NULL,
+  creator_avatar TEXT,
+  server TEXT DEFAULT 'Second Sea (Cafe)',
+  offered_fruits TEXT NOT NULL,
+  requested_fruits TEXT NOT NULL,
+  offered_total_value NUMERIC DEFAULT 0,
+  requested_total_value NUMERIC DEFAULT 0,
+  verdict TEXT DEFAULT 'FAIR',
+  note TEXT,
+  status TEXT DEFAULT 'ACTIVE',
+  session_id TEXT,
+  accepted_by TEXT,
+  accepted_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Create Moderation Audit Log Table (Append-only)
-CREATE TABLE IF NOT EXISTS moderation_audit_log (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  actor_user_id TEXT NOT NULL,
-  actor_username TEXT NOT NULL,
-  actor_role TEXT NOT NULL,
-  target_user_id TEXT NOT NULL,
-  target_username TEXT NOT NULL,
-  action TEXT NOT NULL,
-  reason TEXT NOT NULL,
-  metadata JSONB DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 3. Create Advertising Requests Table
+-- 2. Create Advertising Requests Table
 CREATE TABLE IF NOT EXISTS advertising_requests (
   id TEXT PRIMARY KEY,
   user_id TEXT,
@@ -55,7 +47,66 @@ CREATE TABLE IF NOT EXISTS advertising_requests (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Enable RLS on Profiles Table
+-- 3. Create Role Audit Log Table (Append-only)
+CREATE TABLE IF NOT EXISTS role_audit_log (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  actor_user_id TEXT NOT NULL,
+  actor_username TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  target_user_id TEXT NOT NULL,
+  target_username TEXT NOT NULL,
+  action TEXT NOT NULL,
+  previous_role TEXT,
+  new_role TEXT,
+  reason TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Create Moderation Audit Log Table (Append-only)
+CREATE TABLE IF NOT EXISTS moderation_audit_log (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  actor_user_id TEXT NOT NULL,
+  actor_username TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  target_user_id TEXT NOT NULL,
+  target_username TEXT NOT NULL,
+  action TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Enable RLS on Trade Ads Table
+ALTER TABLE trade_ads ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read trade_ads"
+ON trade_ads FOR SELECT
+USING (true);
+
+CREATE POLICY "Public insert trade_ads"
+ON trade_ads FOR INSERT
+WITH CHECK (true);
+
+CREATE POLICY "Public update trade_ads"
+ON trade_ads FOR UPDATE
+USING (true);
+
+-- 6. Enable RLS on Advertising Requests Table
+ALTER TABLE advertising_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public insert advertising_requests"
+ON advertising_requests FOR INSERT
+WITH CHECK (true);
+
+CREATE POLICY "Public read advertising_requests"
+ON advertising_requests FOR SELECT
+USING (true);
+
+CREATE POLICY "Public update advertising_requests"
+ON advertising_requests FOR UPDATE
+USING (true);
+
+-- 7. Enable RLS on Profiles Table
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public read profiles"
@@ -70,37 +121,7 @@ WITH CHECK (
   (role IS NOT DISTINCT FROM role) -- Prevent self-role modification
 );
 
--- 5. Enable RLS on Giveaways Table
-ALTER TABLE giveaways ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public read giveaways"
-ON giveaways FOR SELECT
-USING (true);
-
-CREATE POLICY "Creator and staff insert giveaways"
-ON giveaways FOR INSERT
-WITH CHECK (true);
-
-CREATE POLICY "Staff update giveaways"
-ON giveaways FOR UPDATE
-USING (true);
-
--- 6. Enable RLS on Advertising Requests Table
-ALTER TABLE advertising_requests ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public insert advertising_requests"
-ON advertising_requests FOR INSERT
-WITH CHECK (true);
-
-CREATE POLICY "Staff read advertising_requests"
-ON advertising_requests FOR SELECT
-USING (true);
-
-CREATE POLICY "Staff update advertising_requests"
-ON advertising_requests FOR UPDATE
-USING (true);
-
--- 7. Enable RLS on Audit Tables
+-- 8. Enable RLS on Audit Tables
 ALTER TABLE role_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE moderation_audit_log ENABLE ROW LEVEL SECURITY;
 
@@ -127,10 +148,9 @@ WITH CHECK (true);
 
 | Table Name | SELECT Policy | INSERT Policy | UPDATE Policy | DELETE Policy |
 | :--- | :--- | :--- | :--- | :--- |
+| `trade_ads` | Public (true) | Public / Auth | Creator / Staff | Staff / Creator |
+| `advertising_requests` | Staff / Public | Public (true) | Staff | Restricted |
 | `profiles` | Public (true) | Self Auth | Self Auth (Role Protected) | Restricted |
 | `giveaways` | Public (true) | Creator / Staff | Staff / Host | Restricted |
-| `giveaway_entries` | Public (true) | Public (true) | Self Auth | Self Auth |
-| `giveaway_reports` | Staff | Public (true) | Staff | Restricted |
-| `advertising_requests` | Staff | Public (true) | Staff | Restricted |
 | `role_audit_log` | Staff | Append-Only (Staff) | NONE (Immutable) | NONE (Immutable) |
 | `moderation_audit_log` | Staff | Append-Only (Staff) | NONE (Immutable) | NONE (Immutable) |

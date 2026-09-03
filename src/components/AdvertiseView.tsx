@@ -112,7 +112,8 @@ export const AdvertiseView: React.FC<AdvertiseViewProps> = ({
       const { error } = await supabase.from('advertising_requests').insert(payload);
 
       if (error) {
-        console.warn('Supabase advertising_requests insert fallback:', error.message);
+        console.warn('Supabase advertising_requests insert error:', error.message);
+        throw new Error(error.message || 'Database error: Failed to submit advertising request.');
       }
 
       playSuccessSound();

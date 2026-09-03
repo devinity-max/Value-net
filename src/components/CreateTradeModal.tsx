@@ -4,6 +4,7 @@ import { useFruits } from '../hooks/useFruits';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playTradeSuccessSound } from '../utils/audio';
 import { FruitImage } from './FruitImage';
+import { apiCreateTradeAd } from '../utils/tradesApi';
 
 export interface CreateTradeModalProps {
   isOpen: boolean;
@@ -30,6 +31,9 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
   const [server, setServer] = useState('Second Sea (Cafe)');
   const [notes, setNotes] = useState('');
   const [activePickerSide, setActivePickerSide] = useState<'offering' | 'seeking' | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const fruits = useFruits();
 
   if (!isOpen) return null;
@@ -53,19 +57,35 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (offering.length === 0 && seeking.length === 0) return;
-    playTradeSuccessSound();
-    const tradeData = {
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+
+    const payload = {
       offeringFruits: offering,
       seekingFruits: seeking,
       server,
       notes,
     };
-    if (onCreateTrade) onCreateTrade(tradeData);
-    if (onTradeCreated) onTradeCreated(tradeData);
-    onClose();
+
+    const res = await apiCreateTradeAd(payload);
+    setIsSubmitting(false);
+
+    if (res.success && res.trade) {
+      playTradeSuccessSound();
+      if (onCreateTrade) onCreateTrade(payload);
+      if (onTradeCreated) onTradeCreated(res.trade);
+      // Reset form
+      setOffering([]);
+      setSeeking([]);
+      setNotes('');
+      onClose();
+    } else {
+      setErrorMessage(res.error || 'Failed to publish trade ad to database.');
+    }
   };
 
   return (
@@ -94,11 +114,17 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
               playClickSound();
               onClose();
             }}
-            className="w-9 h-9 rounded-xl bg-slate-800 text-slate-300 flex items-center justify-center hover:bg-rose-950/60 transition-all"
+            className="w-9 h-9 rounded-xl bg-slate-800 text-slate-300 flex items-center justify-center hover:bg-rose-950/60 transition-all cursor-pointer"
           >
             <span className="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
+
+        {errorMessage && (
+          <div className="mb-4 p-3 bg-rose-950/80 border border-rose-500/80 rounded-xl text-rose-300 text-xs font-mono">
+            ⚠️ {errorMessage}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6 font-sans">
           {/* Offering & Seeking Grid */}
@@ -116,7 +142,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
                       playClickSound();
                       setActivePickerSide('offering');
                     }}
-                    className="px-2 py-1 bg-emerald-950 border border-emerald-500/40 text-emerald-300 rounded-lg text-[10px] font-game font-bold"
+                    className="px-2 py-1 bg-emerald-950 border border-emerald-500/40 text-emerald-300 rounded-lg text-[10px] font-game font-bold cursor-pointer"
                   >
                     + Add
                   </button>
@@ -137,7 +163,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemoveFruit('offering', i)}
-                        className="text-slate-500 hover:text-rose-400"
+                        className="text-slate-500 hover:text-rose-400 cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-xs">close</span>
                       </button>
@@ -165,7 +191,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
                       playClickSound();
                       setActivePickerSide('seeking');
                     }}
-                    className="px-2 py-1 bg-amber-950 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-game font-bold"
+                    className="px-2 py-1 bg-amber-950 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-game font-bold cursor-pointer"
                   >
                     + Add
                   </button>
@@ -186,7 +212,7 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemoveFruit('seeking', i)}
-                        className="text-slate-500 hover:text-rose-400"
+                        className="text-slate-500 hover:text-rose-400 cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-xs">close</span>
                       </button>
@@ -202,45 +228,43 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
             </div>
           </div>
 
-          {/* Fruit selector inline popup */}
+          {/* Fruit Picker Drawer Modal */}
           {activePickerSide && (
-            <div className="p-4 bg-[#0a0d1a] border border-purple-500/50 rounded-2xl">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-xs font-game font-bold text-purple-300 uppercase">
-                  Pick fruit for {activePickerSide === 'offering' ? 'Offering' : 'Seeking'}
+            <div className="p-4 bg-[#141830] border-2 border-purple-500/40 rounded-2xl space-y-3 animate-in zoom-in-95 duration-150">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+                <span className="text-xs font-game font-bold text-white uppercase">
+                  Select Fruit to Add ({activePickerSide})
                 </span>
                 <button
                   type="button"
                   onClick={() => setActivePickerSide(null)}
-                  className="text-xs text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-white text-xs cursor-pointer"
                 >
-                  Close
+                  Cancel
                 </button>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-48 overflow-y-auto pr-1">
-                {fruits.map((fruit) => (
+                {fruits.map((f) => (
                   <button
-                    key={fruit.id}
+                    key={f.id}
                     type="button"
-                    onClick={() => handleAddFruit(activePickerSide, fruit)}
-                    className="p-2 bg-[#141830] hover:bg-[#1f254f] border border-slate-800 hover:border-purple-500 rounded-xl text-left transition-all flex items-center gap-2"
+                    onClick={() => handleAddFruit(activePickerSide, f)}
+                    className="p-2 bg-[#080b18] hover:bg-slate-800 rounded-xl border border-slate-800 hover:border-purple-500/50 flex flex-col items-center text-center transition-all cursor-pointer"
                   >
-                    <FruitImage fruit={fruit} size="xs" className="w-6 h-6 rounded-md shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">{fruit.name}</div>
-                      <div className="text-[10px] text-amber-400 font-mono">${formatMoney(fruit.marketValue)}</div>
-                    </div>
+                    <FruitImage fruit={f} size="xs" className="w-8 h-8 rounded-md mb-1" />
+                    <span className="text-[11px] font-bold text-white truncate w-full">{f.name}</span>
+                    <span className="text-[10px] text-amber-400 font-mono">${formatMoney(f.marketValue)}</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Server & Notes */}
+          {/* Additional Fields */}
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-mono font-bold text-slate-400 mb-1 uppercase">
-                Trading Location / Sea
+                Preferred Trading Location / Server
               </label>
               <select
                 value={server}
@@ -263,17 +287,17 @@ export const CreateTradeModal: React.FC<CreateTradeModalProps> = ({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="e.g. Willing to add Buddha for fast trade"
-                className="w-full bg-[#141830] border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 placeholder-slate-500 outline-none"
+                className="w-full bg-[#141830] border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 placeholder-slate-500 outline-none font-sans"
               />
             </div>
           </div>
 
           <button
             type="submit"
-            disabled={offering.length === 0 && seeking.length === 0}
-            className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-game font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 disabled:opacity-50"
+            disabled={isSubmitting || (offering.length === 0 && seeking.length === 0)}
+            className="w-full py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-game font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg active:scale-95 disabled:opacity-50 cursor-pointer"
           >
-            Publish Live Trade Listing
+            {isSubmitting ? 'Publishing to Supabase Database...' : 'Publish Live Trade Listing'}
           </button>
         </form>
       </div>
