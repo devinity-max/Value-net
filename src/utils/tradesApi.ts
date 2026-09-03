@@ -1,6 +1,7 @@
-import { Fruit, TradeAd } from '../types';
+import { Fruit, TradeAd, TradeSession } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
+import { calculateTrade } from './calc';
 
 export function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -29,13 +30,14 @@ export async function apiCreateTradeAd(payload: {
     return { success: false, error: 'Must select at least one fruit to offer or seek.' };
   }
 
-  const offeredTotalValue = (payload.offeringFruits || []).reduce((sum, f) => sum + (f.marketValue || f.beliPrice || 0), 0);
-  const requestedTotalValue = (payload.seekingFruits || []).reduce((sum, f) => sum + (f.marketValue || f.beliPrice || 0), 0);
+  const analysis = calculateTrade(payload.offeringFruits || [], payload.seekingFruits || []);
+  const offeredTotalValue = analysis.yourMarketValue;
+  const requestedTotalValue = analysis.theirMarketValue;
 
   let verdict: 'WIN' | 'FAIR' | 'LOSS' = 'FAIR';
-  if (requestedTotalValue > offeredTotalValue * 1.1) {
+  if (analysis.grade === 'BW' || analysis.grade === 'W') {
     verdict = 'WIN';
-  } else if (offeredTotalValue > requestedTotalValue * 1.1) {
+  } else if (analysis.grade === 'BL' || analysis.grade === 'L') {
     verdict = 'LOSS';
   }
 
@@ -141,4 +143,89 @@ export async function apiGetTradeAds(): Promise<{ success: boolean; trades: Trad
   }
 
   return { success: true, trades: [] };
+}
+
+export async function apiAcceptTradeAd(
+  tradeId: string,
+  participant: { id: string; username: string; avatarUrl?: string }
+): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
+  try {
+    // Atomic update in Supabase PostgreSQL: only match if status is ACTIVE
+    const { data: updatedTrade, error: sbErr } = await supabase
+      .from('trade_ads')
+      .update({
+        status: 'IN_PROGRESS',
+        accepted_by: participant.id,
+        accepted_by_name: participant.username,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tradeId)
+      .eq('status', 'ACTIVE')
+      .select()
+      .maybeSingle();
+
+    if (sbErr) {
+      return { success: false, error: sbErr.message };
+    }
+
+    if (!updatedTrade) {
+      return { success: false, error: 'Trade is no longer available or was accepted by another user.' };
+    }
+
+    const tradeAd: TradeAd = {
+      id: updatedTrade.id,
+      creatorId: updatedTrade.creator_id,
+      creatorName: updatedTrade.creator_name,
+      creatorAvatar: updatedTrade.creator_avatar || 'person',
+      server: updatedTrade.server || 'Second Sea (Cafe)',
+      offeredFruits: typeof updatedTrade.offered_fruits === 'string' ? JSON.parse(updatedTrade.offered_fruits) : (updatedTrade.offered_fruits || []),
+      requestedFruits: typeof updatedTrade.requested_fruits === 'string' ? JSON.parse(updatedTrade.requested_fruits) : (updatedTrade.requested_fruits || []),
+      offeredTotalValue: Number(updatedTrade.offered_total_value || 0),
+      requestedTotalValue: Number(updatedTrade.requested_total_value || 0),
+      verdict: updatedTrade.verdict || 'FAIR',
+      note: updatedTrade.note || '',
+      status: 'IN_PROGRESS',
+      acceptedBy: participant.id,
+      acceptedByName: participant.username,
+      createdAt: updatedTrade.created_at ? new Date(updatedTrade.created_at).getTime() : Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const session: TradeSession = {
+      id: `session-${tradeId}`,
+      tradeId: updatedTrade.id,
+      creatorId: updatedTrade.creator_id,
+      creatorName: updatedTrade.creator_name,
+      creatorAvatar: updatedTrade.creator_avatar || 'person',
+      participantId: participant.id,
+      participantName: participant.username,
+      participantAvatar: participant.avatarUrl || 'person',
+      tradeAd,
+      creatorConfirmed: false,
+      participantConfirmed: false,
+      status: 'IN_PROGRESS',
+      createdAt: Date.now(),
+    };
+
+    return { success: true, session };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Database error accepting trade.' };
+  }
+}
+
+export async function apiCancelTradeAd(tradeId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { error: sbErr } = await supabase
+      .from('trade_ads')
+      .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
+      .eq('id', tradeId)
+      .eq('creator_id', userId);
+
+    if (sbErr) {
+      return { success: false, error: sbErr.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to cancel trade.' };
+  }
 }

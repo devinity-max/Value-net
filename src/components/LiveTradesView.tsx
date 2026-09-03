@@ -9,6 +9,7 @@ import { TraderProfileModal } from './TraderProfileModal';
 import { NotificationToast } from './NotificationToast';
 import { safeFetchJson } from '../utils/apiHelper';
 import { supabase } from '../lib/supabaseClient';
+import { apiAcceptTradeAd, apiCancelTradeAd } from '../utils/tradesApi';
 import { TrustBadge } from './TrustBadge';
 import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
@@ -281,7 +282,32 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     }
 
     try {
-      const res = await fetch(`/api/trades/${trade.id}/accept`, {
+      // Primary: Atomic claim via Supabase PostgreSQL
+      const res = await apiAcceptTradeAd(trade.id, {
+        id: currentUser.id,
+        username: currentUser.username,
+        avatarUrl: currentUser.avatarIcon,
+      });
+
+      if (res.success && res.session) {
+        playSelectSound();
+        setActiveSession(res.session);
+        setSessionMessages([]);
+        setTrades((prev) =>
+          prev.map((t) =>
+            t.id === trade.id
+              ? { ...t, status: 'IN_PROGRESS', acceptedBy: currentUser.id, acceptedByName: currentUser.username }
+              : t
+          )
+        );
+        return;
+      } else if (res.error) {
+        setActionError(res.error);
+        return;
+      }
+
+      // Fallback: API endpoint with safe Content-Type check
+      const apiRes = await fetch(`/api/trades/${trade.id}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -291,14 +317,19 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to claim trade.');
+      const contentType = apiRes.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await apiRes.json();
+        if (!apiRes.ok) {
+          throw new Error(data.error || 'Failed to claim trade.');
+        }
+        playSelectSound();
+        setActiveSession(data.session);
+        setSessionMessages(data.messages || []);
+      } else {
+        const text = await apiRes.text();
+        throw new Error('Server error: ' + (text.substring(0, 80) || 'Unexpected non-JSON response'));
       }
-
-      playSelectSound();
-      setActiveSession(data.session);
-      setSessionMessages(data.messages || []);
     } catch (err: any) {
       setActionError(err.message || 'Trade is no longer available or was accepted by another user.');
     }
@@ -308,13 +339,8 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
   const handleCancelTrade = async (tradeId: string) => {
     playClickSound();
     try {
-      const res = await fetch(`/api/trades/${tradeId}/cancel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id }),
-      });
-      const data = await res.json();
-      if (data.success) {
+      const res = await apiCancelTradeAd(tradeId, currentUser.id);
+      if (res.success) {
         setTrades((prev) => prev.filter((t) => t.id !== tradeId));
       }
     } catch (err) {

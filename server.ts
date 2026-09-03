@@ -2919,6 +2919,7 @@ function startServer() {
 
   // 5. ATOMIC ACCEPT TRADE -> Create Private Session
   app.post('/api/trades/:id/accept', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     const { id } = req.params;
     const { participantId, participantName, participantAvatar = 'account_circle' } = req.body;
 
