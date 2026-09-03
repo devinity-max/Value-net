@@ -1,6 +1,5 @@
 // VALUE.NET — Authoritative Blox Fruits Asset & Image Integration Engine
-// REAL ASSETS ONLY: Strictly maps catalog entries to real PNG asset files.
-// NO AI ARTWORK, NO SVG APPROXIMATIONS, NO EXTERNAL STOCK URLS.
+// REAL ASSETS ONLY: Strictly maps catalog entries to real PNG asset files located in /assets/fruits/
 
 import { Fruit, FruitRarity } from '../types';
 
@@ -15,30 +14,16 @@ export interface FruitAssetInfo {
   glowColor: string;
 }
 
-/**
- * Normalizes fruit names and IDs for deterministic matching.
- * Examples:
- *  "Dragon (Physical)" -> "dragon"
- *  "Pain (Paw)" -> "pain"
- *  "Dark Blade (Yoru)" -> "dark-blade"
- *  "Ghost (Revive)" -> "ghost"
- *  "Chop (Blade)" -> "chop"
- *  "+1 Fruit Storage" -> "plus-1-storage"
- *  "2x Money Pass" -> "2x-money"
- */
 export function normalizeFruitKey(input: string): string {
   if (!input) return '';
   return input
     .toLowerCase()
     .trim()
-    .replace(/\s*\([^)]*\)/g, '') // remove parentheses content e.g. (Physical), (Paw)
-    .replace(/[^a-z0-9]+/g, '-') // convert non-alphanumeric to hyphens
-    .replace(/^-+|-+$/g, ''); // trim leading/trailing hyphens
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
-/**
- * Secondary alias mappings for Blox Fruits colloquial community names
- */
 const ALIAS_MAP: Record<string, string> = {
   paw: 'pain',
   string: 'spider',
@@ -62,12 +47,9 @@ const ALIAS_MAP: Record<string, string> = {
   momo: 'mammoth',
   kits: 'kitsune',
   leo: 'leopard',
+  tiger: 'leopard',
 };
 
-/**
- * Authoritative Master Registry of Blox Fruits Real Asset Paths
- * References real PNG assets located in /assets/fruits/, /assets/variants/, and /assets/gamepasses/
- */
 export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
   // --- MYTHICAL FRUITS ---
   kitsune: {
@@ -75,7 +57,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Kitsune',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/kitsune.png',
+    imageUrl: '/assets/fruits/462842-kitsune.png',
     primaryColor: '#0ea5e9',
     accentColor: '#38bdf8',
     glowColor: 'rgba(56, 189, 248, 0.5)',
@@ -85,7 +67,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Dragon',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/dragonfruit.png',
+    imageUrl: '/assets/fruits/556737-dragonfruit.png',
     primaryColor: '#e11d48',
     accentColor: '#fb7185',
     glowColor: 'rgba(244, 63, 94, 0.5)',
@@ -95,7 +77,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Leopard',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/leopardfruit.png',
+    imageUrl: '/assets/fruits/988436-tigerfruit.png',
     primaryColor: '#f59e0b',
     accentColor: '#fde047',
     glowColor: 'rgba(245, 158, 11, 0.5)',
@@ -105,7 +87,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Dough',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/doughfruit.png',
+    imageUrl: '/assets/fruits/795619-doughfruit.png',
     primaryColor: '#f97316',
     accentColor: '#ffedd5',
     glowColor: 'rgba(249, 115, 22, 0.5)',
@@ -115,7 +97,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'T-Rex',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/trexfruit.png',
+    imageUrl: '/assets/fruits/778421-trexfruit.png',
     primaryColor: '#22c55e',
     accentColor: '#bbf7d0',
     glowColor: 'rgba(34, 197, 94, 0.5)',
@@ -125,7 +107,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Mammoth',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/mammothfruit.png',
+    imageUrl: '/assets/fruits/822085-mammothfruit.png',
     primaryColor: '#92400e',
     accentColor: '#fde68a',
     glowColor: 'rgba(146, 64, 14, 0.5)',
@@ -135,7 +117,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Spirit',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/spiritfruit.png',
+    imageUrl: '/assets/fruits/478600-spiritfruit.png',
     primaryColor: '#0ea5e9',
     accentColor: '#f43f5e',
     glowColor: 'rgba(236, 72, 153, 0.5)',
@@ -145,7 +127,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Venom',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/venomfruit.png',
+    imageUrl: '/assets/fruits/228287-venomfruit.png',
     primaryColor: '#a855f7',
     accentColor: '#e9d5ff',
     glowColor: 'rgba(168, 85, 247, 0.5)',
@@ -155,7 +137,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Control',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/controlfruit.png',
+    imageUrl: '/assets/fruits/589002-controlfruit.png',
     primaryColor: '#06b6d4',
     accentColor: '#a5f3fc',
     glowColor: 'rgba(6, 182, 212, 0.5)',
@@ -165,7 +147,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Shadow',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/shadowfruit.png',
+    imageUrl: '/assets/fruits/218104-shadowfruit.png',
     primaryColor: '#6366f1',
     accentColor: '#c7d2fe',
     glowColor: 'rgba(99, 102, 241, 0.5)',
@@ -175,7 +157,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Gravity',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/gravityfruit.png',
+    imageUrl: '/assets/fruits/31479-gravityfruit.png',
     primaryColor: '#64748b',
     accentColor: '#cbd5e1',
     glowColor: 'rgba(100, 116, 139, 0.5)',
@@ -185,7 +167,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Yeti',
     category: 'Fruit',
     rarity: 'Mythical',
-    imageUrl: '/assets/fruits/yetifruit.png',
+    imageUrl: '/assets/fruits/109777-yetifruit.png',
     primaryColor: '#38bdf8',
     accentColor: '#e0f2fe',
     glowColor: 'rgba(56, 189, 248, 0.5)',
@@ -197,273 +179,29 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Buddha',
     category: 'Fruit',
     rarity: 'Legendary',
-    imageUrl: '/assets/fruits/buddhafruit.png',
+    imageUrl: '/assets/fruits/462842-kitsune.png',
     primaryColor: '#eab308',
     accentColor: '#fef08a',
     glowColor: 'rgba(234, 179, 8, 0.5)',
-  },
-  portal: {
-    id: 'portal',
-    name: 'Portal',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/portalfruit.png',
-    primaryColor: '#0284c7',
-    accentColor: '#7dd3fc',
-    glowColor: 'rgba(2, 132, 199, 0.5)',
-  },
-  blizzard: {
-    id: 'blizzard',
-    name: 'Blizzard',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/blizzardfruit.png',
-    primaryColor: '#38bdf8',
-    accentColor: '#e0f2fe',
-    glowColor: 'rgba(56, 189, 248, 0.5)',
-  },
-  sound: {
-    id: 'sound',
-    name: 'Sound',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/soundfruit.png',
-    primaryColor: '#d946ef',
-    accentColor: '#f5d0fe',
-    glowColor: 'rgba(217, 70, 239, 0.5)',
-  },
-  rumble: {
-    id: 'rumble',
-    name: 'Rumble',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/rumblefruit.png',
-    primaryColor: '#eab308',
-    accentColor: '#fef9c3',
-    glowColor: 'rgba(234, 179, 8, 0.5)',
-  },
-  phoenix: {
-    id: 'phoenix',
-    name: 'Phoenix',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/phoenixfruit.png',
-    primaryColor: '#0ea5e9',
-    accentColor: '#38bdf8',
-    glowColor: 'rgba(14, 165, 233, 0.5)',
   },
   pain: {
     id: 'pain',
     name: 'Pain (Paw)',
     category: 'Fruit',
     rarity: 'Legendary',
-    imageUrl: '/assets/fruits/painfruit.png',
+    imageUrl: '/assets/fruits/123059-sadnesspain.png',
     primaryColor: '#f43f5e',
     accentColor: '#fda4af',
     glowColor: 'rgba(244, 63, 94, 0.5)',
   },
-  spider: {
-    id: 'spider',
-    name: 'Spider (String)',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/spiderfruit.png',
-    primaryColor: '#e11d48',
-    accentColor: '#fb7185',
-    glowColor: 'rgba(225, 29, 72, 0.5)',
-  },
-  love: {
-    id: 'love',
-    name: 'Love',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/lovefruit.png',
-    primaryColor: '#ec4899',
-    accentColor: '#fbcfe8',
-    glowColor: 'rgba(236, 72, 153, 0.5)',
-  },
-  quake: {
-    id: 'quake',
-    name: 'Quake',
-    category: 'Fruit',
-    rarity: 'Legendary',
-    imageUrl: '/assets/fruits/quakefruit.png',
-    primaryColor: '#3b82f6',
-    accentColor: '#93c5fd',
-    glowColor: 'rgba(59, 130, 246, 0.5)',
-  },
 
-  // --- RARE FRUITS ---
-  magma: {
-    id: 'magma',
-    name: 'Magma',
-    category: 'Fruit',
-    rarity: 'Rare',
-    imageUrl: '/assets/fruits/magmafruit.png',
-    primaryColor: '#ea580c',
-    accentColor: '#fdba74',
-    glowColor: 'rgba(234, 88, 12, 0.4)',
-  },
-  ghost: {
-    id: 'ghost',
-    name: 'Ghost (Revive)',
-    category: 'Fruit',
-    rarity: 'Rare',
-    imageUrl: '/assets/fruits/ghostfruit.png',
-    primaryColor: '#10b981',
-    accentColor: '#6ee7b7',
-    glowColor: 'rgba(16, 185, 129, 0.4)',
-  },
-  light: {
-    id: 'light',
-    name: 'Light',
-    category: 'Fruit',
-    rarity: 'Rare',
-    imageUrl: '/assets/fruits/lightfruit.png',
-    primaryColor: '#eab308',
-    accentColor: '#fef08a',
-    glowColor: 'rgba(234, 179, 8, 0.4)',
-  },
-  rubber: {
-    id: 'rubber',
-    name: 'Rubber',
-    category: 'Fruit',
-    rarity: 'Rare',
-    imageUrl: '/assets/fruits/rubberfruit.png',
-    primaryColor: '#ef4444',
-    accentColor: '#fca5a5',
-    glowColor: 'rgba(239, 68, 68, 0.4)',
-  },
-  barrier: {
-    id: 'barrier',
-    name: 'Barrier',
-    category: 'Fruit',
-    rarity: 'Rare',
-    imageUrl: '/assets/fruits/barrierfruit.png',
-    primaryColor: '#22c55e',
-    accentColor: '#86efac',
-    glowColor: 'rgba(34, 197, 94, 0.4)',
-  },
-
-  // --- UNCOMMON FRUITS ---
-  dark: {
-    id: 'dark',
-    name: 'Dark',
-    category: 'Fruit',
-    rarity: 'Uncommon',
-    imageUrl: '/assets/fruits/darkfruit.png',
-    primaryColor: '#475569',
-    accentColor: '#94a3b8',
-    glowColor: 'rgba(71, 85, 105, 0.4)',
-  },
-  ice: {
-    id: 'ice',
-    name: 'Ice',
-    category: 'Fruit',
-    rarity: 'Uncommon',
-    imageUrl: '/assets/fruits/icefruit.png',
-    primaryColor: '#0ea5e9',
-    accentColor: '#7dd3fc',
-    glowColor: 'rgba(14, 165, 233, 0.4)',
-  },
-  sand: {
-    id: 'sand',
-    name: 'Sand',
-    category: 'Fruit',
-    rarity: 'Uncommon',
-    imageUrl: '/assets/fruits/sandfruit.png',
-    primaryColor: '#d97706',
-    accentColor: '#fde68a',
-    glowColor: 'rgba(217, 119, 6, 0.4)',
-  },
-  falcon: {
-    id: 'falcon',
-    name: 'Falcon',
-    category: 'Fruit',
-    rarity: 'Uncommon',
-    imageUrl: '/assets/fruits/falconfruit.png',
-    primaryColor: '#ca8a04',
-    accentColor: '#fef08a',
-    glowColor: 'rgba(202, 138, 4, 0.4)',
-  },
-  flame: {
-    id: 'flame',
-    name: 'Flame',
-    category: 'Fruit',
-    rarity: 'Uncommon',
-    imageUrl: '/assets/fruits/flamefruit.png',
-    primaryColor: '#ea580c',
-    accentColor: '#fdba74',
-    glowColor: 'rgba(234, 88, 12, 0.4)',
-  },
-  diamond: {
-    id: 'diamond',
-    name: 'Diamond',
-    category: 'Fruit',
-    rarity: 'Uncommon',
-    imageUrl: '/assets/fruits/diamondfruit.png',
-    primaryColor: '#0284c7',
-    accentColor: '#7dd3fc',
-    glowColor: 'rgba(2, 132, 199, 0.4)',
-  },
-
-  // --- COMMON FRUITS ---
-  spike: {
-    id: 'spike',
-    name: 'Spike',
-    category: 'Fruit',
-    rarity: 'Common',
-    imageUrl: '/assets/fruits/spikefruit.png',
-    primaryColor: '#64748b',
-    accentColor: '#94a3b8',
-    glowColor: 'rgba(100, 116, 139, 0.3)',
-  },
-  rocket: {
-    id: 'rocket',
-    name: 'Rocket',
-    category: 'Fruit',
-    rarity: 'Common',
-    imageUrl: '/assets/fruits/rocketfruit.png',
-    primaryColor: '#ef4444',
-    accentColor: '#fca5a5',
-    glowColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  spin: {
-    id: 'spin',
-    name: 'Spin',
-    category: 'Fruit',
-    rarity: 'Common',
-    imageUrl: '/assets/fruits/spinfruit.png',
-    primaryColor: '#eab308',
-    accentColor: '#fef08a',
-    glowColor: 'rgba(234, 179, 8, 0.3)',
-  },
-  chop: {
-    id: 'chop',
-    name: 'Chop (Blade)',
-    category: 'Fruit',
-    rarity: 'Common',
-    imageUrl: '/assets/fruits/chopfruit.png',
-    primaryColor: '#3b82f6',
-    accentColor: '#93c5fd',
-    glowColor: 'rgba(59, 130, 246, 0.3)',
-  },
-  spring: {
-    id: 'spring',
-    name: 'Spring',
-    category: 'Fruit',
-    rarity: 'Common',
-    imageUrl: '/assets/fruits/springfruit.png',
-    primaryColor: '#64748b',
-    accentColor: '#cbd5e1',
-    glowColor: 'rgba(100, 116, 139, 0.3)',
-  },
+  // --- COMMON / UNCOMMON / RARE FRUITS ---
   bomb: {
     id: 'bomb',
     name: 'Bomb',
     category: 'Fruit',
     rarity: 'Common',
-    imageUrl: '/assets/fruits/bombfruit.png',
+    imageUrl: '/assets/fruits/455658-bombfruit.png',
     primaryColor: '#334155',
     accentColor: '#94a3b8',
     glowColor: 'rgba(51, 65, 85, 0.3)',
@@ -473,19 +211,69 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Smoke',
     category: 'Fruit',
     rarity: 'Common',
-    imageUrl: '/assets/fruits/smokefruit.png',
+    imageUrl: '/assets/fruits/368251-smokefruit.png',
     primaryColor: '#64748b',
     accentColor: '#e2e8f0',
     glowColor: 'rgba(100, 116, 139, 0.3)',
   },
+  spin: {
+    id: 'spin',
+    name: 'Spin',
+    category: 'Fruit',
+    rarity: 'Common',
+    imageUrl: '/assets/fruits/709054-spinfruit.png',
+    primaryColor: '#eab308',
+    accentColor: '#fef08a',
+    glowColor: 'rgba(234, 179, 8, 0.3)',
+  },
+  spike: {
+    id: 'spike',
+    name: 'Spike',
+    category: 'Fruit',
+    rarity: 'Common',
+    imageUrl: '/assets/fruits/806632-spikefruit.png',
+    primaryColor: '#64748b',
+    accentColor: '#94a3b8',
+    glowColor: 'rgba(100, 116, 139, 0.3)',
+  },
+  rocket: {
+    id: 'rocket',
+    name: 'Rocket',
+    category: 'Fruit',
+    rarity: 'Common',
+    imageUrl: '/assets/fruits/824076-rocketfruit.png',
+    primaryColor: '#ef4444',
+    accentColor: '#fca5a5',
+    glowColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  spring: {
+    id: 'spring',
+    name: 'Spring',
+    category: 'Fruit',
+    rarity: 'Common',
+    imageUrl: '/assets/fruits/150799-springfruit.png',
+    primaryColor: '#64748b',
+    accentColor: '#cbd5e1',
+    glowColor: 'rgba(100, 116, 139, 0.3)',
+  },
+  chop: {
+    id: 'chop',
+    name: 'Chop (Blade)',
+    category: 'Fruit',
+    rarity: 'Common',
+    imageUrl: '/assets/fruits/850974-bladefruit.png',
+    primaryColor: '#3b82f6',
+    accentColor: '#93c5fd',
+    glowColor: 'rgba(59, 130, 246, 0.3)',
+  },
 
-  // --- GAMEPASS ASSETS (SEPARATE FROM FRUITS) ---
+  // --- GAMEPASS ASSETS ---
   'dark-blade': {
     id: 'dark-blade',
     name: 'Dark Blade (Yoru)',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/darkblade.png',
+    imageUrl: '/assets/fruits/414033-darkblade.png',
     primaryColor: '#22c55e',
     accentColor: '#bbf7d0',
     glowColor: 'rgba(34, 197, 94, 0.6)',
@@ -495,7 +283,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Fruit Notifier',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/fruitnotifier.png',
+    imageUrl: '/assets/fruits/54929-fruitnotifier.png',
     primaryColor: '#a855f7',
     accentColor: '#f3e8ff',
     glowColor: 'rgba(168, 85, 247, 0.6)',
@@ -505,7 +293,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: '2x Money',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/2xmoney.png',
+    imageUrl: '/assets/fruits/594113-2xmoney.png',
     primaryColor: '#eab308',
     accentColor: '#fef08a',
     glowColor: 'rgba(234, 179, 8, 0.6)',
@@ -515,7 +303,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: '2x Mastery',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/2xmastery.png',
+    imageUrl: '/assets/fruits/706576-2xmastery.png',
     primaryColor: '#a855f7',
     accentColor: '#ede9fe',
     glowColor: 'rgba(168, 85, 247, 0.6)',
@@ -525,7 +313,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Fast Boats',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/fastboats.png',
+    imageUrl: '/assets/fruits/680106-fastboats.png',
     primaryColor: '#0ea5e9',
     accentColor: '#e0f2fe',
     glowColor: 'rgba(14, 165, 233, 0.6)',
@@ -535,7 +323,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: '+1 Fruit Storage',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/fruitstorage.png',
+    imageUrl: '/assets/fruits/213056-fruitstorage.png',
     primaryColor: '#f59e0b',
     accentColor: '#fef3c7',
     glowColor: 'rgba(245, 158, 11, 0.6)',
@@ -545,19 +333,19 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Stat Reset',
     category: 'Gamepass',
     rarity: 'Gamepass',
-    imageUrl: '/assets/gamepasses/statreset.png',
+    imageUrl: '/assets/fruits/753758-statreset.png',
     primaryColor: '#38bdf8',
     accentColor: '#e0f2fe',
     glowColor: 'rgba(56, 189, 248, 0.6)',
   },
 
-  // --- VARIANTS / SKINS (SEPARATE CATEGORY) ---
+  // --- VARIANTS / SKINS ---
   'galaxy-kitsune': {
     id: 'galaxy-kitsune',
     name: 'Galaxy Kitsune (Skin)',
     category: 'Variant',
     rarity: 'Mythical',
-    imageUrl: '/assets/variants/galaxykitsune.png',
+    imageUrl: '/assets/fruits/960845-galaxykitsune.png',
     primaryColor: '#8b5cf6',
     accentColor: '#c4b5fd',
     glowColor: 'rgba(139, 92, 246, 0.6)',
@@ -567,7 +355,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Crimson Kitsune (Skin)',
     category: 'Variant',
     rarity: 'Mythical',
-    imageUrl: '/assets/variants/crimsonkitsune.png',
+    imageUrl: '/assets/fruits/219445-crimsonkitsune.png',
     primaryColor: '#ef4444',
     accentColor: '#fca5a5',
     glowColor: 'rgba(239, 68, 68, 0.6)',
@@ -577,7 +365,7 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Ember East Dragon (Skin)',
     category: 'Variant',
     rarity: 'Mythical',
-    imageUrl: '/assets/variants/embereastdragon.png',
+    imageUrl: '/assets/fruits/151846-embereastdragon.png',
     primaryColor: '#f97316',
     accentColor: '#ffedd5',
     glowColor: 'rgba(249, 115, 22, 0.6)',
@@ -587,17 +375,13 @@ export const BLOX_FRUITS_ASSET_REGISTRY: Record<string, FruitAssetInfo> = {
     name: 'Ember West Dragon (Skin)',
     category: 'Variant',
     rarity: 'Mythical',
-    imageUrl: '/assets/variants/emberwestdragon.png',
+    imageUrl: '/assets/fruits/151221-emberwestdragon.png',
     primaryColor: '#f97316',
     accentColor: '#ffedd5',
     glowColor: 'rgba(249, 115, 22, 0.6)',
   },
 };
 
-/**
- * Resolves a fruit or fruit name into an authoritative FruitAssetInfo object.
- * Performs deterministic normalization and alias fallback.
- */
 export function getFruitAsset(fruitOrName?: Fruit | Partial<Fruit> | Record<string, any> | string | null): FruitAssetInfo {
   if (!fruitOrName) {
     return {
@@ -654,9 +438,6 @@ export function getFruitAsset(fruitOrName?: Fruit | Partial<Fruit> | Record<stri
   };
 }
 
-/**
- * Classifies any given item by category and asset resolution status.
- */
 export function classifyAsset(item: Fruit | string): {
   category: 'Fruit' | 'Gamepass' | 'Variant';
   matched: boolean;
