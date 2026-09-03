@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Fruit, TradeAd, TradeSession, TradeMessage, TradeNotification, TraderProfile } from '../types';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
@@ -9,7 +9,13 @@ import { TraderProfileModal } from './TraderProfileModal';
 import { NotificationToast } from './NotificationToast';
 import { safeFetchJson } from '../utils/apiHelper';
 import { supabase } from '../lib/supabaseClient';
-import { apiAcceptTradeAd, apiCancelTradeAd } from '../utils/tradesApi';
+import {
+  apiAcceptTradeAd,
+  apiCancelTradeAd,
+  apiGetActiveSession,
+  apiConfirmTradeSession,
+  apiCancelTradeSession,
+} from '../utils/tradesApi';
 import { TrustBadge } from './TrustBadge';
 import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
@@ -32,8 +38,9 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
   const [activeSession, setActiveSession] = useState<TradeSession | null>(null);
   const [sessionMessages, setSessionMessages] = useState<TradeMessage[]>([]);
   const [toastNotification, setToastNotification] = useState<TradeNotification | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isAccepting, setIsAccepting] = useState<string | null>(null); // tradeId being accepted
 
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -48,230 +55,213 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     return `${hours}h ago`;
   };
 
-  // 1. Initial REST Fetch - use Supabase directly if available
+  // ── Map raw Supabase trade_ad row → TradeAd ──────────────────────────────
+  const mapTradeAdRow = (t: any): TradeAd => ({
+    id: t.id,
+    creatorId: t.creator_id,
+    creatorName: t.creator_name || 'Trader',
+    creatorAvatar: t.creator_avatar || 'person',
+    server: t.server || 'Second Sea (Cafe)',
+    offeredFruits: typeof t.offered_fruits === 'string' ? JSON.parse(t.offered_fruits) : (t.offered_fruits || []),
+    requestedFruits: typeof t.requested_fruits === 'string' ? JSON.parse(t.requested_fruits) : (t.requested_fruits || []),
+    offeredTotalValue: Number(t.offered_total_value || 0),
+    requestedTotalValue: Number(t.requested_total_value || 0),
+    verdict: t.verdict || 'FAIR',
+    note: t.note || '',
+    status: t.status || 'ACTIVE',
+    sessionId: t.session_id,
+    acceptedBy: t.accepted_by,
+    acceptedByName: t.accepted_by_name,
+    createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+    updatedAt: t.updated_at ? new Date(t.updated_at).getTime() : Date.now(),
+  });
+
+  // ── Initial fetch of Trade Ads ────────────────────────────────────────────
   const fetchTrades = async () => {
     try {
-      if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
-        const { data: tradeAds, error: sbErr } = await supabase
-          .from('trade_ads')
-          .select('*')
-          .in('status', ['ACTIVE', 'IN_PROGRESS'])
-          .order('created_at', { ascending: false })
-          .limit(50);
+      const { data: tradeAds, error: sbErr } = await supabase
+        .from('trade_ads')
+        .select('*')
+        .in('status', ['ACTIVE', 'IN_PROGRESS'])
+        .order('created_at', { ascending: false })
+        .limit(50);
 
-        if (!sbErr && tradeAds) {
-          const uniqueMap = new Map<string, TradeAd>();
-          tradeAds.forEach((t: any) => {
-            if (t && t.id) {
-              const mapped: TradeAd = {
-                id: t.id,
-                creatorId: t.creator_id,
-                creatorName: t.creator_name || 'Trader',
-                creatorAvatar: t.creator_avatar || 'person',
-                server: t.server || 'Sea 3',
-                offeredFruits: typeof t.offered_fruits === 'string' ? JSON.parse(t.offered_fruits) : (t.offered_fruits || []),
-                requestedFruits: typeof t.requested_fruits === 'string' ? JSON.parse(t.requested_fruits) : (t.requested_fruits || []),
-                offeredTotalValue: Number(t.offered_total_value || 0),
-                requestedTotalValue: Number(t.requested_total_value || 0),
-                verdict: t.verdict || 'FAIR',
-                note: t.note || '',
-                status: t.status || 'ACTIVE',
-                sessionId: t.session_id,
-                acceptedBy: t.accepted_by,
-                acceptedByName: t.accepted_by_name,
-                createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
-              } as TradeAd;
-              uniqueMap.set(t.id, mapped);
-            }
-          });
-          setTrades(Array.from(uniqueMap.values()));
-          return;
-        }
+      if (!sbErr && tradeAds) {
+        const uniqueMap = new Map<string, TradeAd>();
+        tradeAds.forEach((t: any) => {
+          if (t && t.id) uniqueMap.set(t.id, mapTradeAdRow(t));
+        });
+        setTrades(Array.from(uniqueMap.values()));
+        return;
       }
 
-      // Fallback: try Express API
+      // Express fallback
       const res = await safeFetchJson<{ success: boolean; trades: TradeAd[] }>(
         `/api/trades?userId=${encodeURIComponent(currentUser.id)}`
       );
       if (res.success && res.data && Array.isArray(res.data.trades)) {
         const uniqueMap = new Map<string, TradeAd>();
-        res.data.trades.forEach((t: TradeAd) => {
-          if (t && t.id) uniqueMap.set(t.id, t);
-        });
+        res.data.trades.forEach((t: TradeAd) => { if (t && t.id) uniqueMap.set(t.id, t); });
         setTrades(Array.from(uniqueMap.values()));
       }
     } catch (err) {
-      console.warn('Failed to fetch trades — showing empty board:', err);
+      console.warn('Failed to fetch trades:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 2. Fetch User Active Sessions
-  const checkActiveSessions = async () => {
-    // Skip on Vercel — sessions are managed through Supabase Realtime trade_sessions
-    if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
-      return;
+  // ── Recover any active trade session (tab-focus / mount fallback) ─────────
+  const checkActiveSessions = useCallback(async () => {
+    if (!currentUser.id) return;
+    const res = await apiGetActiveSession(currentUser.id);
+    if (res.success && res.session) {
+      setActiveSession(res.session);
+      playSelectSound();
     }
-    try {
-      const res = await safeFetchJson<{ success: boolean; sessions: TradeSession[] }>(
-        `/api/users/${encodeURIComponent(currentUser.id)}/active-sessions`
-      );
-      if (res.success && res.data && res.data.sessions && res.data.sessions.length > 0) {
-        const currentActive = res.data.sessions[0];
-        setActiveSession(currentActive);
-        loadSessionMessages(currentActive.id);
-      }
-    } catch (e) {
-      console.warn('Failed to check active sessions', e);
-    }
-  };
+  }, [currentUser.id]);
 
-  const loadSessionMessages = async (sessionId: string) => {
-    // Skip on Vercel
-    if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
-      return;
-    }
-    try {
-      const res = await safeFetchJson<{ success: boolean; session: TradeSession; messages: TradeMessage[] }>(
-        `/api/sessions/${encodeURIComponent(sessionId)}?userId=${encodeURIComponent(currentUser.id)}`
-      );
-      if (res.success && res.data) {
-        setActiveSession(res.data.session);
-        setSessionMessages(res.data.messages || []);
-      }
-    } catch (e) {
-      console.warn('Failed to load session messages', e);
-    }
-  };
-
-  // 3. Realtime WebSocket Connection (only on local dev; Vercel uses Supabase Realtime)
+  // ── Supabase Realtime: trade_ads board ────────────────────────────────────
+  // ── Supabase Realtime: trade_sessions for this user ──────────────────────
   useEffect(() => {
     fetchTrades();
     checkActiveSessions();
 
-    // On Vercel (Supabase-connected), skip WebSocket and use Supabase Realtime instead
-    if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
-      return () => {};
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    let reconnectTimer: NodeJS.Timeout;
-
-    const connectWs = () => {
-      try {
-        const socket = new WebSocket(wsUrl);
-        socketRef.current = socket;
-
-        socket.onopen = () => {
-          setWsConnected(true);
-          // Authenticate with trader identity
-          socket.send(
-            JSON.stringify({
-              type: 'AUTH',
-              payload: {
-                userId: currentUser.id,
-                username: currentUser.username,
-              },
-            })
-          );
-        };
-
-        socket.onmessage = (event) => {
-          try {
-            const parsed = JSON.parse(event.data);
-            const { type, payload } = parsed;
-
-            if (type === 'INIT_STATE') {
-              if (payload.trades && Array.isArray(payload.trades)) {
-                const uniqueMap = new Map<string, TradeAd>();
-                payload.trades.forEach((t: TradeAd) => {
-                  if (t && t.id) uniqueMap.set(t.id, t);
-                });
-                setTrades(Array.from(uniqueMap.values()));
-              }
-            } else if (type === 'TRADE_CREATED') {
-              if (payload && payload.id) {
-                setTrades((prev) => {
-                  if (prev.some((t) => t.id === payload.id)) {
-                    return prev.map((t) => (t.id === payload.id ? payload : t));
-                  }
-                  return [payload, ...prev];
-                });
-              }
-            } else if (type === 'TRADE_UPDATED') {
-              if (payload && payload.id) {
-                setTrades((prev) =>
-                  prev.map((t) => (t.id === payload.id ? { ...t, ...payload } : t))
-                );
-              }
-              // If active session belongs to this trade, update session.tradeAd
-              setActiveSession((prev) => {
-                if (prev && prev.tradeId === payload.id) {
-                  return { ...prev, tradeAd: payload };
-                }
-                return prev;
-              });
-            } else if (type === 'TRADE_CANCELLED') {
-              setTrades((prev) => prev.filter((t) => t.id !== payload.tradeId));
-            } else if (type === 'SESSION_STARTED') {
-              const { session, messages } = payload;
-              setActiveSession(session);
-              setSessionMessages(messages || []);
-              playSelectSound();
-            } else if (type === 'SESSION_UPDATED') {
-              const { session, newMsg } = payload;
-              setActiveSession(session);
-              if (newMsg) {
-                setSessionMessages((prev) => {
-                  if (prev.some((m) => m.id === newMsg.id)) return prev;
-                  return [...prev, newMsg];
-                });
-              }
-              playSelectSound();
-            } else if (type === 'NEW_MESSAGE') {
-              setSessionMessages((prev) => {
-                if (prev.some((m) => m.id === payload.id)) return prev;
-                return [...prev, payload];
-              });
-              playClickSound();
-            } else if (type === 'NEW_NOTIFICATION') {
-              setToastNotification(payload);
-              playSelectSound();
-            }
-          } catch (err) {
-            console.error('Error parsing WS message', err);
+    // ── Channel 1: live trade board (INSERT / UPDATE on trade_ads) ──────────
+    const tradeAdsChannel = supabase
+      .channel('trade_ads_board')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'trade_ads' },
+        (payload) => {
+          const newTrade = mapTradeAdRow(payload.new);
+          if (newTrade && newTrade.id) {
+            setTrades((prev) => {
+              if (prev.some((t) => t.id === newTrade.id)) return prev;
+              return [newTrade, ...prev];
+            });
           }
-        };
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'trade_ads' },
+        (payload) => {
+          const updated = mapTradeAdRow(payload.new);
+          if (updated && updated.id) {
+            setTrades((prev) =>
+              prev.map((t) => (t.id === updated.id ? updated : t))
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        setRealtimeConnected(status === 'SUBSCRIBED');
+      });
 
-        socket.onclose = () => {
-          setWsConnected(false);
-          reconnectTimer = setTimeout(connectWs, 3000);
-        };
+    // ── Channel 2: trade_sessions where I am creator OR participant ──────────
+    // Supabase Realtime filter only supports single column; we subscribe to all
+    // sessions and filter client-side for our user ID (RLS ensures we only
+    // receive rows we're authorized to see).
+    const tradeSessionsChannel = supabase
+      .channel(`trade_sessions_user_${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'trade_sessions' },
+        (payload) => {
+          const row = payload.new as any;
+          // Only react if I am a participant in this session
+          if (row.creator_id !== currentUser.id && row.participant_id !== currentUser.id) return;
 
-        socket.onerror = () => {
-          setWsConnected(false);
-          socket.close();
-        };
-      } catch (e) {
-        console.error('WebSocket connection error', e);
-        reconnectTimer = setTimeout(connectWs, 3000);
-      }
-    };
+          // Build TradeSession from the raw row
+          const offeredFruits = typeof row.offered_fruits === 'string'
+            ? JSON.parse(row.offered_fruits) : (row.offered_fruits || []);
+          const requestedFruits = typeof row.requested_fruits === 'string'
+            ? JSON.parse(row.requested_fruits) : (row.requested_fruits || []);
 
-    connectWs();
+          const session: TradeSession = {
+            id: row.id,
+            tradeId: row.trade_ad_id,
+            creatorId: row.creator_id,
+            creatorName: row.creator_name,
+            creatorAvatar: row.creator_avatar || 'person',
+            participantId: row.participant_id,
+            participantName: row.participant_name,
+            participantAvatar: row.participant_avatar || 'person',
+            tradeAd: {
+              id: row.trade_ad_id,
+              creatorId: row.creator_id,
+              creatorName: row.creator_name,
+              creatorAvatar: row.creator_avatar || 'person',
+              server: 'Second Sea (Cafe)',
+              offeredFruits,
+              requestedFruits,
+              offeredTotalValue: Number(row.offered_total_value || 0),
+              requestedTotalValue: Number(row.requested_total_value || 0),
+              verdict: row.verdict || 'FAIR',
+              note: '',
+              status: 'IN_PROGRESS',
+              sessionId: row.id,
+              createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+              updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+            },
+            creatorConfirmed: row.creator_confirmed ?? false,
+            participantConfirmed: row.participant_confirmed ?? false,
+            status: row.status || 'IN_PROGRESS',
+            createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+          };
+
+          setActiveSession(session);
+          setSessionMessages([]);
+          playSelectSound();
+
+          // Show toast notification to the trade creator (not the accepter who already has the panel open)
+          if (row.creator_id === currentUser.id) {
+            setToastNotification({
+              id: `notif-${row.id}`,
+              userId: currentUser.id,
+              title: '⚔️ Trade Accepted!',
+              message: `@${row.participant_name} accepted your trade offer.`,
+              type: 'acceptance',
+              tradeId: row.trade_ad_id,
+              sessionId: row.id,
+              createdAt: Date.now(),
+              read: false,
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'trade_sessions' },
+        (payload) => {
+          const row = payload.new as any;
+          if (row.creator_id !== currentUser.id && row.participant_id !== currentUser.id) return;
+          setActiveSession((prev) => {
+            if (!prev || prev.id !== row.id) return prev;
+            return { ...prev, status: row.status, creatorConfirmed: row.creator_confirmed, participantConfirmed: row.participant_confirmed };
+          });
+        }
+      )
+      .subscribe();
+
+    // ── Tab focus fallback: recover session when user returns to tab ─────────
+    const onFocus = () => checkActiveSessions();
+    window.addEventListener('focus', onFocus);
 
     return () => {
-      clearTimeout(reconnectTimer);
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
+      supabase.removeChannel(tradeAdsChannel);
+      supabase.removeChannel(tradeSessionsChannel);
+      window.removeEventListener('focus', onFocus);
+      if (socketRef.current) socketRef.current.close();
     };
-  }, [currentUser.id, currentUser.username]);
+  }, [currentUser.id, currentUser.username, checkActiveSessions]);
 
-  // 4. Accept Trade Handler (Atomic claim)
+
+
+
+
+  // ── Accept Trade (creates real persisted session) ─────────────────────────
   const handleAcceptTrade = async (trade: TradeAd) => {
     setActionError(null);
     playClickSound();
@@ -281,8 +271,10 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
       return;
     }
 
+    if (isAccepting) return; // prevent double-click
+    setIsAccepting(trade.id);
+
     try {
-      // Primary: Atomic claim via Supabase PostgreSQL
       const res = await apiAcceptTradeAd(trade.id, {
         id: currentUser.id,
         username: currentUser.username,
@@ -293,49 +285,27 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         playSelectSound();
         setActiveSession(res.session);
         setSessionMessages([]);
+        // Optimistically update local trade list
         setTrades((prev) =>
           prev.map((t) =>
             t.id === trade.id
-              ? { ...t, status: 'IN_PROGRESS', acceptedBy: currentUser.id, acceptedByName: currentUser.username }
+              ? { ...t, status: 'IN_PROGRESS', acceptedBy: currentUser.id, acceptedByName: currentUser.username, sessionId: res.session!.id }
               : t
           )
         );
-        return;
-      } else if (res.error) {
-        setActionError(res.error);
-        return;
-      }
-
-      // Fallback: API endpoint with safe Content-Type check
-      const apiRes = await fetch(`/api/trades/${trade.id}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participantId: currentUser.id,
-          participantName: currentUser.username,
-          participantAvatar: currentUser.avatarIcon,
-        }),
-      });
-
-      const contentType = apiRes.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await apiRes.json();
-        if (!apiRes.ok) {
-          throw new Error(data.error || 'Failed to claim trade.');
-        }
-        playSelectSound();
-        setActiveSession(data.session);
-        setSessionMessages(data.messages || []);
       } else {
-        const text = await apiRes.text();
-        throw new Error('Server error: ' + (text.substring(0, 80) || 'Unexpected non-JSON response'));
+        setActionError(res.error || 'Trade is no longer available or was accepted by another user.');
       }
     } catch (err: any) {
-      setActionError(err.message || 'Trade is no longer available or was accepted by another user.');
+      setActionError(err.message || 'Failed to accept trade.');
+    } finally {
+      setIsAccepting(null);
     }
   };
 
-  // 5. Cancel Trade Handler (Creator only)
+
+
+  // ── Cancel Trade (creator only) ───────────────────────────────────────────
   const handleCancelTrade = async (tradeId: string) => {
     playClickSound();
     try {
@@ -348,66 +318,24 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     }
   };
 
-  // 6. Send Chat Message Handler
-  const handleSendMessage = async (text: string) => {
+  // ── Confirm Trade ─────────────────────────────────────────────────────────
+  const handleConfirmTrade = async (sessionId: string) => {
     if (!activeSession) return;
-    try {
-      await fetch(`/api/sessions/${activeSession.id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          senderId: currentUser.id,
-          senderName: currentUser.username,
-          message: text,
-        }),
-      });
-    } catch (err) {
-      console.error('Failed to send message', err);
+    const role = currentUser.id === activeSession.creatorId ? 'creator' : 'participant';
+    const res = await apiConfirmTradeSession(sessionId, currentUser.id, role);
+    if (res.success && res.session) {
+      setActiveSession(res.session);
     }
   };
 
-  // 7. Confirm Trade Handler (Two-party confirm)
-  const handleConfirmTrade = async () => {
+  // ── Reject Trade ──────────────────────────────────────────────────────────
+  const handleRejectTrade = async (sessionId: string, _reason?: string) => {
     if (!activeSession) return;
-    try {
-      const res = await fetch(`/api/sessions/${activeSession.id}/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUser.id,
-          userName: currentUser.username,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setActiveSession(data.session);
-      }
-    } catch (err) {
-      console.error('Failed to confirm trade', err);
-    }
+    await apiCancelTradeSession(sessionId, activeSession.tradeId);
+    setActiveSession((prev) => prev ? { ...prev, status: 'REJECTED' } : null);
   };
 
-  // 8. Reject Trade Handler
-  const handleRejectTrade = async (reason?: string) => {
-    if (!activeSession) return;
-    try {
-      const res = await fetch(`/api/sessions/${activeSession.id}/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUser.id,
-          userName: currentUser.username,
-          reason,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setActiveSession(data.session);
-      }
-    } catch (err) {
-      console.error('Failed to reject trade', err);
-    }
-  };
+
 
   // Filter and Search list (with Set-based ID deduplication)
   const filteredTrades = useMemo(() => {
@@ -444,8 +372,8 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         <NotificationToast
           notification={toastNotification}
           onDismiss={() => setToastNotification(null)}
-          onOpenSession={(sessId) => {
-            loadSessionMessages(sessId);
+          onOpenSession={(_sessId) => {
+            checkActiveSessions();
           }}
         />
       )}
@@ -480,13 +408,14 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#161b36] border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.15)] mb-3">
           <span
             className={`w-2 h-2 rounded-full ${
-              wsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+              realtimeConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
             }`}
           />
           <span className="text-[11px] font-game font-bold uppercase tracking-wider text-purple-200">
-            {wsConnected ? 'REAL-TIME P2P TRADE MARKETPLACE' : 'CONNECTING TO NETWORK...'}
+            {realtimeConnected ? 'REAL-TIME P2P TRADE MARKETPLACE' : 'CONNECTING TO NETWORK...'}
           </span>
         </div>
+
 
         <h1 className="text-3xl sm:text-5xl font-black font-game tracking-tight text-white mb-3">
           LIVE TRADES & <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-amber-400 to-yellow-500">NEGOTIATIONS</span>
@@ -559,7 +488,8 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
             <button
               onClick={() => {
                 playSelectSound();
-                loadSessionMessages(activeSession.id);
+                // Session is already in state — just ensure it's open by re-setting it
+                setActiveSession((prev) => prev ? { ...prev } : prev);
               }}
               className="game-btn-gold px-5 py-2.5 rounded-xl font-game text-xs font-black uppercase tracking-wider"
             >
@@ -831,7 +761,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
                           <button
                             onClick={() => {
                               playSelectSound();
-                              if (trade.sessionId) loadSessionMessages(trade.sessionId);
+                              checkActiveSessions();
                             }}
                             className="px-3.5 py-1.5 rounded-xl bg-amber-950/80 text-amber-300 border border-amber-400 font-game text-xs font-bold uppercase shadow-md animate-pulse"
                           >
@@ -918,7 +848,6 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
           session={activeSession}
           currentUser={currentUser}
           messages={sessionMessages}
-          onSendMessage={handleSendMessage}
           onConfirmTrade={handleConfirmTrade}
           onRejectTrade={handleRejectTrade}
           onClosePanel={() => setActiveSession(null)}
