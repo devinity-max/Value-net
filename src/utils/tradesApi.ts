@@ -2,6 +2,17 @@ import { Fruit, TradeAd } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
 
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export async function apiCreateTradeAd(payload: {
   offeringFruits: Fruit[];
   seekingFruits: Fruit[];
@@ -28,7 +39,8 @@ export async function apiCreateTradeAd(payload: {
     verdict = 'LOSS';
   }
 
-  const id = `trade-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  // Canonical RFC4122 v4 UUID (PostgreSQL compliant)
+  const id = generateUUID();
   const now = Date.now();
 
   const createdTrade: TradeAd = {

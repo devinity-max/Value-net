@@ -1,6 +1,7 @@
 import { GiveawayItem, GiveawayEntry, GiveawayReport, GiveawayStatus } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
+import { generateUUID } from './tradesApi';
 
 const STORAGE_KEY = 'valuenet_local_giveaways';
 
@@ -200,7 +201,7 @@ export async function apiCreateGiveaway(payload: {
     };
   }
 
-  const id = `gw-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const id = generateUUID();
 
   const createdItem: GiveawayItem = {
     id,

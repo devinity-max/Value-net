@@ -3,6 +3,7 @@ import { AuthUser, ActiveTab } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { getDiscordUrl } from '../utils/brandSettings';
 import { playClickSound, playSuccessSound } from '../utils/audio';
+import { generateUUID } from '../utils/tradesApi';
 
 interface AdvertiseViewProps {
   currentUser: AuthUser | null;
@@ -95,7 +96,7 @@ export const AdvertiseView: React.FC<AdvertiseViewProps> = ({
 
     try {
       const payload = {
-        id: `adreq-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        id: generateUUID(),
         user_id: currentUser?.id || null,
         name: name.trim(),
         discord_username: discordUsername.trim(),
