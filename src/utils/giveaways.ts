@@ -2,7 +2,23 @@ import { GiveawayItem, GiveawayEntry, GiveawayReport, GiveawayStatus } from '../
 import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
 
-let localGiveawaysCache: GiveawayItem[] = [];
+const STORAGE_KEY = 'valuenet_local_giveaways';
+
+function getStoredLocalGiveaways(): GiveawayItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return [];
+}
+
+function saveStoredLocalGiveaways(items: GiveawayItem[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch {}
+}
+
+let localGiveawaysCache: GiveawayItem[] = getStoredLocalGiveaways();
 
 export async function apiGetGiveaways(params?: {
   filter?: string;
@@ -59,7 +75,7 @@ export async function apiGetGiveaways(params?: {
     console.warn('Supabase giveaways fetch error:', err);
   }
 
-  // Combine with local in-memory cache (deduplicate by ID)
+  // Combine with local persisted cache (deduplicate by ID)
   const map = new Map<string, GiveawayItem>();
   localGiveawaysCache.forEach((g) => map.set(g.id, g));
   list.forEach((g) => map.set(g.id, g));
@@ -207,10 +223,11 @@ export async function apiCreateGiveaway(payload: {
     youtubeRedemptionCount: 0,
   };
 
-  // 1. Immediately cache in local memory so it shows instantly everywhere
+  // 1. Immediately cache & persist in local storage
   localGiveawaysCache = [createdItem, ...localGiveawaysCache];
+  saveStoredLocalGiveaways(localGiveawaysCache);
 
-  // 2. Persist in Supabase DB
+  // 2. Try inserting into Supabase DB
   try {
     const dbPayload = {
       id,
@@ -247,10 +264,11 @@ export async function apiCreateGiveaway(payload: {
         id: dbGw.id,
       };
       localGiveawaysCache = localGiveawaysCache.map((g) => (g.id === id ? dbCreated : g));
+      saveStoredLocalGiveaways(localGiveawaysCache);
       return { success: true, giveaway: dbCreated };
     }
   } catch (err: any) {
-    console.warn('Supabase createGiveaway fallback:', err);
+    console.warn('Supabase createGiveaway DB fallback:', err);
   }
 
   return { success: true, giveaway: createdItem };
@@ -276,10 +294,10 @@ export async function apiUpdateGiveaway(
     youtubeBoostPercentage: number;
   }>
 ): Promise<{ success: boolean; giveaway?: GiveawayItem; error?: string }> {
-  // Update local cache
   localGiveawaysCache = localGiveawaysCache.map((g) =>
     g.id === id ? { ...g, ...payload, status: (payload.status || g.status) as GiveawayStatus } : g
   );
+  saveStoredLocalGiveaways(localGiveawaysCache);
 
   try {
     const dbChanges: Record<string, any> = {};
@@ -428,6 +446,11 @@ export const apiVerifyGiveawayCode = apiRedeemGiveawayBoost;
 export async function apiDrawGiveawayWinner(
   giveawayId: string
 ): Promise<{ success: boolean; message?: string; winner?: any; giveaway?: GiveawayItem; error?: string }> {
+  localGiveawaysCache = localGiveawaysCache.map((g) =>
+    g.id === giveawayId ? { ...g, status: 'COMPLETED' as GiveawayStatus } : g
+  );
+  saveStoredLocalGiveaways(localGiveawaysCache);
+
   try {
     const { data: entries } = await supabase
       .from('giveaway_entries')
@@ -476,6 +499,11 @@ export async function apiEndGiveaway(
 export async function apiCancelGiveaway(
   giveawayId: string
 ): Promise<{ success: boolean; message?: string; giveaway?: GiveawayItem; error?: string }> {
+  localGiveawaysCache = localGiveawaysCache.map((g) =>
+    g.id === giveawayId ? { ...g, status: 'CANCELLED' as GiveawayStatus } : g
+  );
+  saveStoredLocalGiveaways(localGiveawaysCache);
+
   await apiUpdateGiveaway(giveawayId, { status: 'CANCELLED' });
   const gwRes = await apiGetGiveaway(giveawayId);
   return { success: true, message: 'Giveaway cancelled.', giveaway: gwRes.giveaway };
