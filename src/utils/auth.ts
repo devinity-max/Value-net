@@ -34,13 +34,22 @@ export function setStoredUser(user: AuthUser | null): void {
 /**
  * Maps raw Supabase or server error responses to human-friendly messages.
  */
-function mapAuthError(err: any): string {
+function mapAuthError(err: any, context: 'login' | 'signup' | 'general' = 'general'): string {
   if (!err) return 'An error occurred during authentication.';
   const msg = typeof err === 'string' ? err : err.message || '';
   const code = err.code || err.status || '';
   const lowerMsg = msg.toLowerCase();
 
-  if (code === 'over_email_send_rate_limit' || code === '429' || lowerMsg.includes('rate limit') || lowerMsg.includes('too many')) {
+  // Diagnostic logging (dev mode / browser console)
+  if (import.meta.env.DEV || typeof window !== 'undefined') {
+    console.log(`[AUTH DIAGNOSTIC] context: ${context} | code/status: ${code} | raw message: "${msg}"`);
+  }
+
+  if (code === 'over_email_send_rate_limit' || code === 429 || lowerMsg.includes('email rate limit') || lowerMsg.includes('over_email_send_rate_limit')) {
+    return 'Supabase email limit reached. If you already created an account, please check your email inbox to verify your email address or try signing in.';
+  }
+
+  if (code === 'rate_limit' || lowerMsg.includes('too many requests') || lowerMsg.includes('too many authentication attempts')) {
     return 'Too many authentication attempts right now. Please wait a few minutes before trying again.';
   }
 
@@ -49,10 +58,10 @@ function mapAuthError(err: any): string {
   }
 
   if (lowerMsg.includes('email not confirmed') || lowerMsg.includes('unconfirmed')) {
-    return 'Please verify your email address before signing in. Check your inbox for the confirmation link.';
+    return 'Your email address has not been confirmed yet. Please check your email inbox for the verification link before signing in.';
   }
 
-  if (lowerMsg.includes('user already registered') || lowerMsg.includes('already exists')) {
+  if (lowerMsg.includes('user already registered') || lowerMsg.includes('already exists') || lowerMsg.includes('already registered')) {
     return 'An account with this email address already exists. Please sign in instead.';
   }
 
@@ -209,6 +218,7 @@ export async function apiLogin(
         emailToUse = identifier.toLowerCase();
       }
 
+      console.log(`[AUTH] Executing single signInWithPassword call for email="${emailToUse}"...`);
       const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
         email: emailToUse,
         password: password,
@@ -260,11 +270,11 @@ export async function apiLogin(
         setStoredUser(authUser);
         return { success: true, user: authUser };
       } else if (authErr) {
-        return { success: false, error: mapAuthError(authErr) };
+        return { success: false, error: mapAuthError(authErr, 'login') };
       }
     } catch (sbErr: any) {
       console.warn('Supabase Auth error:', sbErr);
-      return { success: false, error: mapAuthError(sbErr) };
+      return { success: false, error: mapAuthError(sbErr, 'login') };
     }
   }
 
@@ -312,6 +322,8 @@ export async function apiSignup(
     displayName = (usernameOrData.displayName || username).trim();
   }
 
+  console.log(`[AUTH] apiSignup called for username="${username}", email="${email}"`);
+
   if (!username) {
     return { success: false, error: 'Trading username is required.' };
   }
@@ -333,10 +345,13 @@ export async function apiSignup(
         .maybeSingle();
 
       if (existingUser) {
+        console.log(`[AUTH] Username '${username}' is already taken.`);
         return { success: false, error: `Username '${username}' is already taken. Please choose a different username.` };
       }
 
       const redirectUrl = `${getCanonicalSiteUrl()}/?auth=confirmed`;
+      console.log(`[AUTH] Executing single Supabase signUp call for email="${email}"...`);
+
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email,
         password,
@@ -349,8 +364,31 @@ export async function apiSignup(
         },
       });
 
-      if (!authErr && authData?.user) {
+      console.log(`[AUTH] Supabase signUp response:`, {
+        userId: authData?.user?.id,
+        identitiesCount: authData?.user?.identities?.length,
+        hasSession: !!authData?.session,
+        error: authErr?.message,
+        errorCode: authErr?.code,
+        status: (authErr as any)?.status,
+      });
+
+      if (authErr) {
+        return { success: false, error: mapAuthError(authErr, 'signup') };
+      }
+
+      if (authData?.user) {
+        // Detect if user account ALREADY existed in Supabase Auth (identities array is empty)
+        if (authData.user.identities && authData.user.identities.length === 0) {
+          console.log(`[AUTH] User identities is empty array — account already exists in Supabase Auth.`);
+          return {
+            success: false,
+            error: 'An account with this email address already exists. Please sign in instead.',
+          };
+        }
+
         // Ensure profile row is inserted into DB profiles table
+        console.log(`[AUTH] Ensuring profile row for userId="${authData.user.id}"...`);
         const profileRes = await apiEnsureProfile(authData.user.id, {
           username,
           email,
@@ -393,23 +431,23 @@ export async function apiSignup(
 
         const isConfirmed = !!authData.user.email_confirmed_at || !!authData.session;
         if (isConfirmed) {
+          console.log(`[AUTH] User confirmed/authenticated immediately. Logged in.`);
           setStoredUser(authUser);
           return { success: true, user: authUser };
         } else {
+          console.log(`[AUTH] Email confirmation required. Verification notification displayed.`);
           return {
             success: true,
             user: authUser,
             confirmationRequired: true,
             email,
-            message: 'Account created! Check your email inbox to confirm your account before signing in.',
+            message: 'Account created! Please check your email inbox to confirm your account before signing in.',
           };
         }
-      } else if (authErr) {
-        return { success: false, error: mapAuthError(authErr) };
       }
     } catch (sbErr: any) {
       console.warn('Supabase Signup error:', sbErr);
-      return { success: false, error: mapAuthError(sbErr) };
+      return { success: false, error: mapAuthError(sbErr, 'signup') };
     }
   }
 

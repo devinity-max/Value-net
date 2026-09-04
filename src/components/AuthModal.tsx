@@ -23,6 +23,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) {
+      console.log('[AUTH UI] Submission blocked — request already in flight.');
+      return;
+    }
+    console.log(`[AUTH UI] Form submit triggered. Mode: "${mode}"`);
     setError(null);
     setInfoMessage(null);
     setLoading(true);
