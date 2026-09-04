@@ -152,6 +152,8 @@ export default function App() {
             window.history.replaceState(null, '', window.location.pathname);
           }
         }
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
       }
     });
 

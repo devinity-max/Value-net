@@ -133,29 +133,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-mono text-slate-400 uppercase font-bold mb-1">
-              Roblox / Trading Username
+              {mode === 'login' ? 'Email or Roblox Username' : 'Roblox / Trading Username'}
             </label>
             <input
               type="text"
               required
+              disabled={loading}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. Vortex_Samurai"
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none"
+              placeholder={mode === 'login' ? 'e.g. you@example.com or Vortex_Samurai' : 'e.g. Vortex_Samurai'}
+              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none disabled:opacity-50"
             />
           </div>
 
           {mode === 'register' && (
             <div>
               <label className="block text-xs font-mono text-slate-400 uppercase font-bold mb-1">
-                Email (Optional for recovery)
+                Email Address (Required)
               </label>
               <input
                 type="email"
+                required
+                disabled={loading}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none disabled:opacity-50"
               />
             </div>
           )}
@@ -167,10 +170,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             <input
               type="password"
               required
+              disabled={loading}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none"
+              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-amber-500 focus:outline-none disabled:opacity-50"
             />
           </div>
 
@@ -179,7 +183,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             disabled={loading}
             className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs font-mono tracking-wider uppercase transition-all duration-200 shadow-lg shadow-amber-500/20 disabled:opacity-50 cursor-pointer"
           >
-            {loading ? 'AUTHENTICATING...' : mode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT'}
+            {loading
+              ? mode === 'register'
+                ? 'CREATING ACCOUNT...'
+                : 'AUTHENTICATING...'
+              : mode === 'login'
+              ? 'SIGN IN'
+              : 'CREATE ACCOUNT'}
           </button>
         </form>
 
