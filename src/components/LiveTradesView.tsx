@@ -23,12 +23,13 @@ import { FruitImage } from './FruitImage';
 interface LiveTradesViewProps {
   onLoadTrade: (yourFruits: Fruit[], theirFruits: Fruit[]) => void;
   onViewTraderProfile?: (username: string) => void;
+  onOpenAuth?: () => void;
 }
 
-export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onViewTraderProfile }) => {
+export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onViewTraderProfile, onOpenAuth }) => {
   const [currentUser, setCurrentUser] = useState<TraderProfile>(getStoredTraderProfile);
   const [trades, setTrades] = useState<TradeAd[]>([]);
-  const [filter, setFilter] = useState<'ACTIVE' | 'ALL' | 'MY' | 'WIN' | 'FAIR' | 'LOSS'>('ACTIVE');
+  const [filter, setFilter] = useState<'ACTIVE' | 'ALL' | 'MY'>('ACTIVE');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -266,7 +267,16 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     setActionError(null);
     playClickSound();
 
-    if (trade.creatorId === currentUser.id) {
+    const { data: authData } = await supabase.auth.getUser();
+    const authenticatedId = authData?.user?.id;
+
+    if (!authenticatedId) {
+      setActionError('You must be logged in to accept trade advertisements.');
+      if (onOpenAuth) onOpenAuth();
+      return;
+    }
+
+    if (trade.creatorId === authenticatedId) {
       setActionError('You cannot accept your own trade advertisement.');
       return;
     }
@@ -276,8 +286,8 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
 
     try {
       const res = await apiAcceptTradeAd(trade.id, {
-        id: currentUser.id,
-        username: currentUser.username,
+        id: authenticatedId,
+        username: authData.user?.user_metadata?.username || currentUser.username,
         avatarUrl: currentUser.avatarIcon,
       });
 
@@ -289,7 +299,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         setTrades((prev) =>
           prev.map((t) =>
             t.id === trade.id
-              ? { ...t, status: 'IN_PROGRESS', acceptedBy: currentUser.id, acceptedByName: currentUser.username, sessionId: res.session!.id }
+              ? { ...t, status: 'IN_PROGRESS', acceptedBy: authenticatedId, acceptedByName: currentUser.username, sessionId: res.session!.id }
               : t
           )
         );
@@ -349,8 +359,6 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         if (trade.status !== 'ACTIVE' && trade.status !== 'IN_PROGRESS') return false;
       } else if (filter === 'MY') {
         if (trade.creatorId !== currentUser.id && trade.acceptedBy !== currentUser.id) return false;
-      } else if (filter === 'WIN' || filter === 'FAIR' || filter === 'LOSS') {
-        if (trade.verdict !== filter || trade.status === 'CANCELLED') return false;
       }
 
       if (searchQuery.trim()) {
@@ -512,9 +520,6 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
               { id: 'ACTIVE', label: 'ACTIVE' },
               { id: 'ALL', label: 'ALL ADS' },
               { id: 'MY', label: 'MY POSTS' },
-              { id: 'WIN', label: 'WIN' },
-              { id: 'FAIR', label: 'FAIR' },
-              { id: 'LOSS', label: 'LOSS' },
             ] as const
           ).map((f) => (
             <button
@@ -647,11 +652,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
                       <span
                         className={`px-2.5 py-1 rounded-xl text-[10px] font-game font-bold uppercase tracking-wider ${
                           trade.status === 'ACTIVE'
-                            ? displayVerdict === 'WIN'
-                              ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-500/50'
-                              : displayVerdict === 'FAIR'
-                              ? 'bg-amber-950/70 text-amber-300 border border-amber-500/50'
-                              : 'bg-rose-950/70 text-rose-300 border border-rose-500/50'
+                            ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-500/50'
                             : trade.status === 'IN_PROGRESS'
                             ? 'bg-amber-950/80 text-amber-300 border border-amber-400 animate-pulse'
                             : trade.status === 'CONFIRMED'
@@ -659,7 +660,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
                             : 'bg-slate-900 text-slate-400 border border-slate-700'
                         }`}
                       >
-                        {trade.status === 'ACTIVE' ? `VERDICT: ${displayVerdict}` : trade.status}
+                        {trade.status === 'IN_PROGRESS' ? 'NEGOTIATING' : trade.status === 'CONFIRMED' ? 'COMPLETED' : trade.status}
                       </span>
                     </div>
                   </div>
@@ -719,15 +720,8 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
                   )}
                 </div>
 
-                {/* Card Footer: Difference readout & Primary Actions */}
-                <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                  <span className="font-game text-xs font-bold text-slate-400">
-                    DELTA:{' '}
-                    <strong className={diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {diff >= 0 ? '+' : ''}${formatMoney(diff)}
-                    </strong>
-                  </span>
-
+                {/* Card Footer: Primary Actions */}
+                <div className="pt-3 border-t border-slate-800 flex justify-end items-center gap-3">
                   <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                     {/* Test in Calculator */}
                     <button

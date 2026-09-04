@@ -503,6 +503,7 @@ export default function App() {
             <LiveTradesView
               onLoadTrade={handleLoadTrade}
               onViewTraderProfile={handleViewTraderProfile}
+              onOpenAuth={() => setIsAuthModalOpen(true)}
             />
           </ErrorBoundary>
         )}

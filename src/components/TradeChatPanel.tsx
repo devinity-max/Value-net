@@ -321,20 +321,17 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
               </div>
             </div>
 
-            {/* Verdict + Calculator link */}
-            <div className="flex items-center justify-between gap-2">
-              <div className={`px-2.5 py-1 rounded-lg border text-[10px] font-game font-bold uppercase tracking-wider ${verdictColor}`}>
-                YOUR VERDICT: {userVerdict.verdict}
-              </div>
-              {onLoadTradeInCalc && (
+            {/* Calculator link */}
+            {onLoadTradeInCalc && (
+              <div className="flex items-center justify-end pt-1">
                 <button
                   onClick={() => onLoadTradeInCalc(userVerdict.giverFruits, userVerdict.receiverFruits)}
                   className="text-[9px] font-game font-bold text-purple-400 hover:text-purple-300 uppercase tracking-wider transition-colors"
                 >
                   OPEN IN CALC →
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
 

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
 import { calculateTrade } from './calc';
 
-// ─── UUID Generator ──────────────────────────────────────────────────────────
+// ─── UUID Helpers ────────────────────────────────────────────────────────────
 export function generateUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -13,6 +13,12 @@ export function generateUUID(): string {
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+export function isValidUUID(id: string | null | undefined): boolean {
+  if (!id || typeof id !== 'string') return false;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
 }
 
 // ─── Map DB row → TradeSession ───────────────────────────────────────────────
@@ -107,7 +113,16 @@ export async function apiCreateTradeAd(payload: {
 
   // Derive creator_id from trusted Supabase session
   const { data: authData } = await supabase.auth.getUser();
-  const creatorId = authData?.user?.id || user.id;
+  let creatorId = authData?.user?.id;
+  if (!creatorId || !isValidUUID(creatorId)) {
+    if (user && user.id && isValidUUID(user.id)) {
+      creatorId = user.id;
+    }
+  }
+
+  if (!creatorId || !isValidUUID(creatorId)) {
+    return { success: false, error: 'You must be logged in to create a trade advertisement.' };
+  }
 
   const id = generateUUID();
   const now = Date.now();
@@ -231,7 +246,19 @@ export async function apiAcceptTradeAd(
   try {
     // 1. Derive participant_id from trusted Supabase auth session
     const { data: authData } = await supabase.auth.getUser();
-    const participantId = authData?.user?.id || participant.id;
+    let participantId = authData?.user?.id;
+    if (!participantId || !isValidUUID(participantId)) {
+      if (participant && participant.id && isValidUUID(participant.id)) {
+        participantId = participant.id;
+      }
+    }
+
+    if (!participantId || !isValidUUID(participantId)) {
+      return {
+        success: false,
+        error: 'You must be logged in to accept trade advertisements.',
+      };
+    }
 
     // 2. Fetch the Trade Ad first to check eligibility and get creator info
     const { data: tradeAdRow, error: fetchErr } = await supabase
