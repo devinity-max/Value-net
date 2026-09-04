@@ -112,6 +112,29 @@ export default function App() {
     };
     syncUser();
 
+    // Handle PKCE Authorization Code Exchange (e.g. ?code=... returning from email confirmation link)
+    const urlParams = new URLSearchParams(window.location.search);
+    const authCode = urlParams.get('code');
+    if (authCode) {
+      supabase.auth.exchangeCodeForSession(authCode).then(({ data, error }) => {
+        if (!error && data?.session) {
+          showToast('✅ Email confirmed successfully! Welcome to VALUE.NET.', 'success');
+          apiGetMe().then((me) => {
+            if (me) {
+              setCurrentUser(me);
+              setViewingProfileUsername(me.username);
+            }
+          });
+        } else if (error) {
+          console.warn('Code exchange failed:', error.message);
+          showToast(`⚠️ Confirmation Error: ${error.message}`, 'error');
+        }
+        window.history.replaceState(null, '', window.location.pathname);
+      }).catch((err) => {
+        console.warn('Code exchange catch:', err);
+      });
+    }
+
     // Subscribe to Supabase auth events (e.g. returning from email confirmation or password recovery)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
@@ -148,7 +171,7 @@ export default function App() {
         showToast(`⚠️ Auth Error: ${errDesc}`, 'error');
       }
       window.history.replaceState(null, '', window.location.pathname);
-    } else if (search.includes('auth=confirmed') && !hash) {
+    } else if (search.includes('auth=confirmed') && !hash && !authCode) {
       showToast('✅ Email confirmed! Please sign in to continue.', 'success');
       window.history.replaceState(null, '', window.location.pathname);
     }
