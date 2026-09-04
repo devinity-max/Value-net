@@ -402,8 +402,12 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
   // ── Reject Trade ──────────────────────────────────────────────────────────
   const handleRejectTrade = async (sessionId: string, _reason?: string) => {
     if (!activeSession) return;
-    await apiCancelTradeSession(sessionId, activeSession.tradeId);
-    setActiveSession((prev) => prev ? { ...prev, status: 'REJECTED' } : null);
+    const res = await apiCancelTradeSession(sessionId, activeSession.tradeId);
+    if (res.success && res.session) {
+      setActiveSession(res.session);
+    } else {
+      setActiveSession((prev) => prev ? { ...prev, status: 'REJECTED' } : null);
+    }
   };
 
 

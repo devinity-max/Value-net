@@ -540,7 +540,18 @@ export async function apiSendTradeMessage(
   if (message.length > 500) return { success: false, error: 'Message too long (max 500 chars).' };
 
   try {
-    // Derive sender from trusted Supabase session
+    // 1. Verify session is active (IN_PROGRESS)
+    const { data: sessRow } = await supabase
+      .from('trade_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (sessRow && sessRow.status !== 'IN_PROGRESS') {
+      return { success: false, error: 'Trade session is no longer active. Messages cannot be sent.' };
+    }
+
+    // 2. Derive sender from trusted Supabase session
     const { data: authData } = await supabase.auth.getUser();
     const senderId = authData?.user?.id || sender.id;
 
@@ -570,49 +581,54 @@ export async function apiConfirmTradeSession(
   role: 'creator' | 'participant'
 ): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
   try {
-    const field = role === 'creator' ? 'creator_confirmed' : 'participant_confirmed';
-    const updatePayload: Record<string, any> = {
-      [field]: true,
-      updated_at: new Date().toISOString(),
-    };
-
-    // Fetch current session to check if both confirmed after this update
-    const { data: currentSession } = await supabase
+    // 1. Fetch current session to check status and existing confirmation flags
+    const { data: currentSession, error: fetchErr } = await supabase
       .from('trade_sessions')
       .select('*')
       .eq('id', sessionId)
       .maybeSingle();
 
-    if (!currentSession) return { success: false, error: 'Session not found.' };
+    if (fetchErr || !currentSession) return { success: false, error: 'Session not found.' };
 
+    // Terminal session check (immutable)
+    if (['CONFIRMED', 'COMPLETED', 'REJECTED', 'DECLINED', 'CLOSED'].includes(currentSession.status)) {
+      return { success: true, session: mapDbSession(currentSession) };
+    }
+
+    const field = role === 'creator' ? 'creator_confirmed' : 'participant_confirmed';
     const otherConfirmed =
       role === 'creator'
-        ? currentSession.participant_confirmed
-        : currentSession.creator_confirmed;
+        ? (currentSession.participant_confirmed ?? false)
+        : (currentSession.creator_confirmed ?? false);
+
+    const updatePayload: Record<string, any> = {
+      [field]: true,
+      updated_at: new Date().toISOString(),
+    };
 
     if (otherConfirmed) {
       updatePayload.status = 'CONFIRMED';
       updatePayload.closed_at = new Date().toISOString();
     }
 
-    const { data, error } = await supabase
+    const { data: updatedSession, error: updateErr } = await supabase
       .from('trade_sessions')
       .update(updatePayload)
       .eq('id', sessionId)
       .select()
       .maybeSingle();
 
-    if (error) return { success: false, error: error.message };
+    if (updateErr) return { success: false, error: updateErr.message };
 
     // Also update trade_ad status if both confirmed
-    if (otherConfirmed) {
+    if (otherConfirmed && currentSession.trade_ad_id) {
       await supabase
         .from('trade_ads')
         .update({ status: 'CONFIRMED', updated_at: new Date().toISOString() })
         .eq('id', currentSession.trade_ad_id);
     }
 
-    return { success: true, session: data ? mapDbSession(data) : undefined };
+    return { success: true, session: updatedSession ? mapDbSession(updatedSession) : undefined };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -622,23 +638,39 @@ export async function apiConfirmTradeSession(
 export async function apiCancelTradeSession(
   sessionId: string,
   tradeAdId: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
   try {
-    await supabase
+    const { data: currentSession } = await supabase
+      .from('trade_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (currentSession && ['CONFIRMED', 'COMPLETED', 'REJECTED', 'DECLINED', 'CLOSED'].includes(currentSession.status)) {
+      return { success: true, session: mapDbSession(currentSession) };
+    }
+
+    const { data: updatedSession, error: sessErr } = await supabase
       .from('trade_sessions')
       .update({
-        status: 'CLOSED',
+        status: 'REJECTED',
         closed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .select()
+      .maybeSingle();
 
-    await supabase
-      .from('trade_ads')
-      .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
-      .eq('id', tradeAdId);
+    if (tradeAdId) {
+      await supabase
+        .from('trade_ads')
+        .update({ status: 'CANCELLED', updated_at: new Date().toISOString() })
+        .eq('id', tradeAdId);
+    }
 
-    return { success: true };
+    if (sessErr) return { success: false, error: sessErr.message };
+
+    return { success: true, session: updatedSession ? mapDbSession(updatedSession) : undefined };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
