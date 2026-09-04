@@ -138,3 +138,54 @@ export function calculateTrade(
     },
   };
 }
+
+/**
+ * Calculates trade valuation and verdict dynamically from the perspective of a specific user.
+ * - Creator: Gives offeredFruits, Receives requestedFruits
+ * - Accepter: Gives requestedFruits, Receives offeredFruits
+ */
+export function getTradeVerdictForUser(
+  offeredFruits: (Fruit | null | undefined)[] = [],
+  requestedFruits: (Fruit | null | undefined)[] = [],
+  currentUserId?: string | null,
+  creatorId?: string | null
+): {
+  analysis: TradeAnalysis;
+  verdict: 'WIN' | 'FAIR' | 'LOSS';
+  giverFruits: Fruit[];
+  receiverFruits: Fruit[];
+  giveValue: number;
+  receiveValue: number;
+  isCreator: boolean;
+} {
+  const isCreator = Boolean(
+    currentUserId && creatorId && String(currentUserId) === String(creatorId)
+  );
+
+  const safeOffered = (offeredFruits || []).filter((f): f is Fruit => Boolean(f && typeof f === 'object'));
+  const safeRequested = (requestedFruits || []).filter((f): f is Fruit => Boolean(f && typeof f === 'object'));
+
+  // Creator gives offered & receives requested. Accepter gives requested & receives offered.
+  const yourFruits = isCreator ? safeOffered : safeRequested;
+  const theirFruits = isCreator ? safeRequested : safeOffered;
+
+  const analysis = calculateTrade(yourFruits, theirFruits);
+  let verdict: 'WIN' | 'FAIR' | 'LOSS' = 'FAIR';
+
+  if (analysis.grade === 'BW' || analysis.grade === 'W') {
+    verdict = 'WIN';
+  } else if (analysis.grade === 'BL' || analysis.grade === 'L') {
+    verdict = 'LOSS';
+  }
+
+  return {
+    analysis,
+    verdict,
+    giverFruits: yourFruits,
+    receiverFruits: theirFruits,
+    giveValue: analysis.yourMarketValue,
+    receiveValue: analysis.theirMarketValue,
+    isCreator,
+  };
+}
+

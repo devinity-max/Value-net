@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Fruit, TradeAd, TradeSession, TradeMessage, TradeNotification, TraderProfile } from '../types';
-import { formatMoney } from '../utils/calc';
+import { formatMoney, getTradeVerdictForUser } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
 import { getStoredTraderProfile, saveTraderProfile } from '../utils/traderProfile';
 import { CreateTradeModal } from './CreateTradeModal';
@@ -567,7 +567,14 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
           {filteredTrades.map((trade, idx) => {
             const isMyAd = trade.creatorId === currentUser.id;
             const isClaimedByMe = trade.acceptedBy === currentUser.id;
-            const diff = trade.requestedTotalValue - trade.offeredTotalValue;
+            const userVerdict = getTradeVerdictForUser(
+              trade.offeredFruits,
+              trade.requestedFruits,
+              currentUser.id,
+              trade.creatorId
+            );
+            const diff = userVerdict.analysis.diff;
+            const displayVerdict = userVerdict.verdict;
 
             return (
               <React.Fragment key={trade.id}>
@@ -640,9 +647,9 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
                       <span
                         className={`px-2.5 py-1 rounded-xl text-[10px] font-game font-bold uppercase tracking-wider ${
                           trade.status === 'ACTIVE'
-                            ? trade.verdict === 'WIN'
+                            ? displayVerdict === 'WIN'
                               ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-500/50'
-                              : trade.verdict === 'FAIR'
+                              : displayVerdict === 'FAIR'
                               ? 'bg-amber-950/70 text-amber-300 border border-amber-500/50'
                               : 'bg-rose-950/70 text-rose-300 border border-rose-500/50'
                             : trade.status === 'IN_PROGRESS'
@@ -652,7 +659,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
                             : 'bg-slate-900 text-slate-400 border border-slate-700'
                         }`}
                       >
-                        {trade.status === 'ACTIVE' ? `VERDICT: ${trade.verdict}` : trade.status}
+                        {trade.status === 'ACTIVE' ? `VERDICT: ${displayVerdict}` : trade.status}
                       </span>
                     </div>
                   </div>

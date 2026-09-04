@@ -32,8 +32,13 @@ CREATE TABLE IF NOT EXISTS trade_ads (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure additive columns exist on trade_ads
+ALTER TABLE trade_ads ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE trade_ads ADD COLUMN IF NOT EXISTS accepted_by TEXT;
+ALTER TABLE trade_ads ADD COLUMN IF NOT EXISTS accepted_by_name TEXT;
+
 -- ================================================================
--- 2. Trade Sessions Table (shared between both participants)
+-- 2. Trade Sessions Table
 -- ================================================================
 CREATE TABLE IF NOT EXISTS trade_sessions (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -44,8 +49,8 @@ CREATE TABLE IF NOT EXISTS trade_sessions (
   participant_id TEXT NOT NULL,
   participant_name TEXT NOT NULL,
   participant_avatar TEXT,
-  offered_fruits TEXT NOT NULL DEFAULT '[]',
-  requested_fruits TEXT NOT NULL DEFAULT '[]',
+  offered_fruits TEXT DEFAULT '[]',
+  requested_fruits TEXT DEFAULT '[]',
   offered_total_value NUMERIC DEFAULT 0,
   requested_total_value NUMERIC DEFAULT 0,
   verdict TEXT DEFAULT 'FAIR',
@@ -57,8 +62,18 @@ CREATE TABLE IF NOT EXISTS trade_sessions (
   closed_at TIMESTAMPTZ
 );
 
+-- Ensure additive columns exist on trade_sessions for existing tables
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS offered_fruits TEXT DEFAULT '[]';
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS requested_fruits TEXT DEFAULT '[]';
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS offered_total_value NUMERIC DEFAULT 0;
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS requested_total_value NUMERIC DEFAULT 0;
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS verdict TEXT DEFAULT 'FAIR';
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS creator_confirmed BOOLEAN DEFAULT FALSE;
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS participant_confirmed BOOLEAN DEFAULT FALSE;
+ALTER TABLE trade_sessions ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+
 -- ================================================================
--- 3. Trade Messages Table (chat within a trade session)
+-- 3. Trade Messages Table
 -- ================================================================
 CREATE TABLE IF NOT EXISTS trade_messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -70,7 +85,64 @@ CREATE TABLE IF NOT EXISTS trade_messages (
 );
 
 -- ================================================================
--- 4. Advertising Requests Table
+-- 4. Giveaways Table
+-- ================================================================
+CREATE TABLE IF NOT EXISTS giveaways (
+  id TEXT PRIMARY KEY,
+  host_id TEXT NOT NULL,
+  host_name TEXT NOT NULL,
+  host_display_name TEXT,
+  host_avatar TEXT DEFAULT 'person',
+  host_title TEXT,
+  host_role TEXT DEFAULT 'MEMBER',
+  host_badges TEXT DEFAULT '[]',
+  title TEXT NOT NULL,
+  description TEXT,
+  prizes TEXT NOT NULL DEFAULT '[]',
+  rules TEXT DEFAULT '[]',
+  eligibility TEXT DEFAULT '{}',
+  status TEXT DEFAULT 'ACTIVE',
+  starts_at TIMESTAMPTZ DEFAULT NOW(),
+  ends_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '1 day',
+  max_participants INT,
+  participant_count INT DEFAULT 0,
+  allow_leave BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  winner_id TEXT,
+  winner_username TEXT,
+  winner_display_name TEXT,
+  winner_avatar TEXT,
+  completed_at TIMESTAMPTZ,
+  youtube_boost_enabled BOOLEAN DEFAULT FALSE,
+  youtube_video_id TEXT,
+  youtube_boost_percentage NUMERIC DEFAULT 0,
+  youtube_redemption_count INT DEFAULT 0
+);
+
+-- Ensure additive columns exist on giveaways
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_boost_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_video_id TEXT;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_boost_percentage NUMERIC DEFAULT 0;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_redemption_count INT DEFAULT 0;
+
+-- ================================================================
+-- 5. Giveaway Entries Table
+-- ================================================================
+CREATE TABLE IF NOT EXISTS giveaway_entries (
+  id TEXT PRIMARY KEY,
+  giveaway_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  display_name TEXT,
+  avatar_url TEXT DEFAULT 'person',
+  joined_at TIMESTAMPTZ DEFAULT NOW(),
+  is_boosted BOOLEAN DEFAULT FALSE,
+  weight NUMERIC DEFAULT 1
+);
+
+-- ================================================================
+-- 6. Advertising Requests Table
 -- ================================================================
 CREATE TABLE IF NOT EXISTS advertising_requests (
   id TEXT PRIMARY KEY,
@@ -89,7 +161,7 @@ CREATE TABLE IF NOT EXISTS advertising_requests (
 );
 
 -- ================================================================
--- 5. Role Audit Log Table (Append-only)
+-- 7. Role Audit Log Table (Append-only)
 -- ================================================================
 CREATE TABLE IF NOT EXISTS role_audit_log (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -106,7 +178,7 @@ CREATE TABLE IF NOT EXISTS role_audit_log (
 );
 
 -- ================================================================
--- 6. Moderation Audit Log Table (Append-only)
+-- 8. Moderation Audit Log Table (Append-only)
 -- ================================================================
 CREATE TABLE IF NOT EXISTS moderation_audit_log (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -122,43 +194,28 @@ CREATE TABLE IF NOT EXISTS moderation_audit_log (
 );
 
 -- ================================================================
--- 7. Enable Realtime on key tables
---    (Run in Supabase Dashboard → Database → Replication)
--- ================================================================
--- ALTER PUBLICATION supabase_realtime ADD TABLE trade_sessions;
--- ALTER PUBLICATION supabase_realtime ADD TABLE trade_messages;
--- (Uncomment and run separately in the Supabase Dashboard if needed)
-
--- ================================================================
--- 8. RLS — Trade Ads
+-- 9. RLS — Trade Ads
 -- ================================================================
 ALTER TABLE trade_ads ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public read trade_ads" ON trade_ads;
-DROP POLICY IF EXISTS "Public insert trade_ads" ON trade_ads;
-DROP POLICY IF EXISTS "Creator and staff insert trade_ads" ON trade_ads;
-DROP POLICY IF EXISTS "Users insert own trade_ads" ON trade_ads;
 DROP POLICY IF EXISTS "Authenticated users insert trade_ads" ON trade_ads;
 DROP POLICY IF EXISTS "Users update own trade_ads" ON trade_ads;
-DROP POLICY IF EXISTS "Public update trade_ads" ON trade_ads;
 
--- Public / Community READ active trade ads
 CREATE POLICY "Public read trade_ads"
 ON trade_ads FOR SELECT
 USING (true);
 
--- All authenticated members can insert trade ads
 CREATE POLICY "Authenticated users insert trade_ads"
 ON trade_ads FOR INSERT
 WITH CHECK (creator_id IS NOT NULL);
 
--- Users can update their own trade ads (accept/cancel/session update)
 CREATE POLICY "Users update own trade_ads"
 ON trade_ads FOR UPDATE
 USING (true);
 
 -- ================================================================
--- 9. RLS — Trade Sessions
+-- 10. RLS — Trade Sessions (Explicit ::text casts on both sides)
 -- ================================================================
 ALTER TABLE trade_sessions ENABLE ROW LEVEL SECURITY;
 
@@ -166,30 +223,26 @@ DROP POLICY IF EXISTS "Participants read own trade_sessions" ON trade_sessions;
 DROP POLICY IF EXISTS "Authenticated insert trade_sessions" ON trade_sessions;
 DROP POLICY IF EXISTS "Participants update own trade_sessions" ON trade_sessions;
 
--- Only participants in the session can read it
 CREATE POLICY "Participants read own trade_sessions"
 ON trade_sessions FOR SELECT
 USING (auth.uid()::text = creator_id::text OR auth.uid()::text = participant_id::text);
 
--- Only the authenticated accepter (participant) can insert a session
 CREATE POLICY "Authenticated insert trade_sessions"
 ON trade_sessions FOR INSERT
 WITH CHECK (auth.uid()::text = participant_id::text);
 
--- Both participants can update (confirm/reject/close)
 CREATE POLICY "Participants update own trade_sessions"
 ON trade_sessions FOR UPDATE
 USING (auth.uid()::text = creator_id::text OR auth.uid()::text = participant_id::text);
 
 -- ================================================================
--- 10. RLS — Trade Messages
+-- 11. RLS — Trade Messages (Explicit ::text casts on both sides)
 -- ================================================================
 ALTER TABLE trade_messages ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Session participants read messages" ON trade_messages;
 DROP POLICY IF EXISTS "Session participants send messages" ON trade_messages;
 
--- Only session participants can read messages
 CREATE POLICY "Session participants read messages"
 ON trade_messages FOR SELECT
 USING (
@@ -200,7 +253,6 @@ USING (
   )
 );
 
--- Only session participants can send messages into active sessions
 CREATE POLICY "Session participants send messages"
 ON trade_messages FOR INSERT
 WITH CHECK (
@@ -214,7 +266,52 @@ WITH CHECK (
 );
 
 -- ================================================================
--- 11. RLS — Advertising Requests
+-- 12. RLS — Giveaways (Normal Members can VIEW active giveaways)
+-- ================================================================
+ALTER TABLE giveaways ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read giveaways" ON giveaways;
+DROP POLICY IF EXISTS "Creators and staff insert giveaways" ON giveaways;
+DROP POLICY IF EXISTS "Hosts and staff update giveaways" ON giveaways;
+
+-- PUBLIC READ: Anyone (including normal authenticated members) can read active giveaways
+CREATE POLICY "Public read giveaways"
+ON giveaways FOR SELECT
+USING (true);
+
+-- INSERT: Creator / Staff only
+CREATE POLICY "Creators and staff insert giveaways"
+ON giveaways FOR INSERT
+WITH CHECK (auth.uid()::text = host_id::text);
+
+-- UPDATE: Host / Staff update
+CREATE POLICY "Hosts and staff update giveaways"
+ON giveaways FOR UPDATE
+USING (true);
+
+-- ================================================================
+-- 13. RLS — Giveaway Entries
+-- ================================================================
+ALTER TABLE giveaway_entries ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read giveaway_entries" ON giveaway_entries;
+DROP POLICY IF EXISTS "Authenticated users insert giveaway_entries" ON giveaway_entries;
+DROP POLICY IF EXISTS "Users delete own giveaway_entries" ON giveaway_entries;
+
+CREATE POLICY "Public read giveaway_entries"
+ON giveaway_entries FOR SELECT
+USING (true);
+
+CREATE POLICY "Authenticated users insert giveaway_entries"
+ON giveaway_entries FOR INSERT
+WITH CHECK (auth.uid()::text = user_id::text);
+
+CREATE POLICY "Users delete own giveaway_entries"
+ON giveaway_entries FOR DELETE
+USING (auth.uid()::text = user_id::text);
+
+-- ================================================================
+-- 14. RLS — Advertising Requests
 -- ================================================================
 ALTER TABLE advertising_requests ENABLE ROW LEVEL SECURITY;
 
@@ -235,7 +332,7 @@ ON advertising_requests FOR UPDATE
 USING (true);
 
 -- ================================================================
--- 12. RLS — Profiles
+-- 15. RLS — Profiles
 -- ================================================================
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
@@ -252,62 +349,21 @@ USING (auth.uid()::text = id::text)
 WITH CHECK (
   auth.uid()::text = id::text
 );
-
--- ================================================================
--- 13. RLS — Audit Tables
--- ================================================================
-ALTER TABLE role_audit_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE moderation_audit_log ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Staff read role_audit_log" ON role_audit_log;
-DROP POLICY IF EXISTS "Staff insert role_audit_log" ON role_audit_log;
-DROP POLICY IF EXISTS "Staff read moderation_audit_log" ON moderation_audit_log;
-DROP POLICY IF EXISTS "Staff insert moderation_audit_log" ON moderation_audit_log;
-
-CREATE POLICY "Staff read role_audit_log"
-ON role_audit_log FOR SELECT
-USING (true);
-
-CREATE POLICY "Staff insert role_audit_log"
-ON role_audit_log FOR INSERT
-WITH CHECK (true);
-
-CREATE POLICY "Staff read moderation_audit_log"
-ON moderation_audit_log FOR SELECT
-USING (true);
-
-CREATE POLICY "Staff insert moderation_audit_log"
-ON moderation_audit_log FOR INSERT
-WITH CHECK (true);
 ```
 
 ---
 
-## 2. Enable Realtime for Trade Tables
+## 2. Enable Realtime for Trade & Giveaway Tables
 
 Go to your **Supabase Dashboard → Database → Replication → supabase_realtime publication** and enable the following tables:
 
 - `trade_sessions`
 - `trade_messages`
 - `trade_ads`
-
-Or run:
+- `giveaways`
 ```sql
 ALTER PUBLICATION supabase_realtime ADD TABLE trade_sessions;
 ALTER PUBLICATION supabase_realtime ADD TABLE trade_messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE trade_ads;
+ALTER PUBLICATION supabase_realtime ADD TABLE giveaways;
 ```
-
----
-
-## 3. Table Summary & RLS Matrix
-
-| Table | SELECT | INSERT | UPDATE | DELETE |
-| :--- | :--- | :--- | :--- | :--- |
-| `trade_ads` | Public (true) | Auth members (creator_id NOT NULL) | Public (true) | Restricted |
-| `trade_sessions` | Participants only | Participant only (participant_id = auth.uid()) | Both participants | Restricted |
-| `trade_messages` | Session participants only | Session participants in active session | NONE | NONE |
-| `advertising_requests` | Public | Public | Public | Restricted |
-| `profiles` | Public | Self Auth | Self Auth | Restricted |
-| `role_audit_log` | Staff | Append-Only | NONE | NONE |
-| `moderation_audit_log` | Staff | Append-Only | NONE | NONE |

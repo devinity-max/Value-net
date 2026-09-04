@@ -304,8 +304,8 @@ export async function apiAcceptTradeAd(
         ? JSON.parse(tradeAdRow.requested_fruits)
         : tradeAdRow.requested_fruits || [];
 
-    // 4. Insert a real trade_sessions row in Supabase
-    const sessionPayload = {
+    // 4. Insert a real trade_sessions row in Supabase (with fallback if optional columns missing in live DB)
+    const fullSessionPayload: Record<string, any> = {
       trade_ad_id: tradeId,
       creator_id: tradeAdRow.creator_id,
       creator_name: tradeAdRow.creator_name,
@@ -323,11 +323,43 @@ export async function apiAcceptTradeAd(
       status: 'IN_PROGRESS',
     };
 
-    const { data: newSession, error: sessionErr } = await supabase
+    let newSession: any = null;
+    let sessionErr: any = null;
+
+    const res = await supabase
       .from('trade_sessions')
-      .insert(sessionPayload)
+      .insert(fullSessionPayload)
       .select()
       .maybeSingle();
+
+    newSession = res.data;
+    sessionErr = res.error;
+
+    // Fallback: If live DB trade_sessions table lacks offered_fruits column, insert core columns only
+    if (sessionErr && (sessionErr.message?.includes('offered_fruits') || sessionErr.message?.includes('schema cache'))) {
+      console.warn('trade_sessions table lacks fruit metadata columns — retrying insert with core columns:', sessionErr.message);
+      const corePayload = {
+        trade_ad_id: tradeId,
+        creator_id: tradeAdRow.creator_id,
+        creator_name: tradeAdRow.creator_name,
+        creator_avatar: tradeAdRow.creator_avatar || 'person',
+        participant_id: participantId,
+        participant_name: participant.username,
+        participant_avatar: participant.avatarUrl || 'person',
+        creator_confirmed: false,
+        participant_confirmed: false,
+        status: 'IN_PROGRESS',
+      };
+
+      const fallbackRes = await supabase
+        .from('trade_sessions')
+        .insert(corePayload)
+        .select()
+        .maybeSingle();
+
+      newSession = fallbackRes.data;
+      sessionErr = fallbackRes.error;
+    }
 
     if (sessionErr || !newSession) {
       return {

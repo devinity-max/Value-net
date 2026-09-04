@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TradeSession, TradeMessage, TraderProfile, AuthUser } from '../types';
-import { formatMoney } from '../utils/calc';
+import { formatMoney, getTradeVerdictForUser } from '../utils/calc';
 import { FruitImage } from './FruitImage';
 import { apiSendTradeMessage, apiGetTradeMessages } from '../utils/tradesApi';
 import { supabase } from '../lib/supabaseClient';
@@ -163,12 +163,19 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
   const isClosed = session.status === 'CONFIRMED' || session.status === 'REJECTED' || session.status === 'CLOSED';
   const isActive = session.status === 'IN_PROGRESS';
 
+  const userVerdict = getTradeVerdictForUser(
+    trade?.offeredFruits || [],
+    trade?.requestedFruits || [],
+    currentUser?.id,
+    session.creatorId
+  );
+
   const verdictColors: Record<string, string> = {
     WIN: 'text-emerald-400 border-emerald-500/40 bg-emerald-950/60',
     FAIR: 'text-amber-300 border-amber-500/40 bg-amber-950/60',
     LOSS: 'text-rose-400 border-rose-500/40 bg-rose-950/60',
   };
-  const verdictColor = verdictColors[trade?.verdict || 'FAIR'] || verdictColors['FAIR'];
+  const verdictColor = verdictColors[userVerdict.verdict || 'FAIR'] || verdictColors['FAIR'];
 
   return (
     <>
@@ -266,48 +273,48 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
         {trade && (
           <div className="flex-shrink-0 px-4 py-3 bg-[#090e1f]/80 border-b border-purple-500/15">
             <div className="text-[9px] font-game font-bold text-slate-500 uppercase tracking-widest mb-2">
-              Trade Summary
+              Trade Summary ({isCreator ? 'Owner' : 'Participant'} Perspective)
             </div>
             <div className="grid grid-cols-2 gap-2 mb-2">
-              {/* Offered */}
+              {/* Offered / Given by Current User */}
               <div className="p-2.5 rounded-xl bg-[#0e1530]/80 border border-purple-500/20">
                 <div className="text-[9px] font-game font-bold text-purple-400 uppercase mb-1.5 flex justify-between">
-                  <span>YOU OFFER</span>
-                  <span className="text-emerald-400 font-mono">${formatMoney(trade.offeredTotalValue)}</span>
+                  <span>YOU GIVE</span>
+                  <span className="text-purple-300 font-mono">${formatMoney(userVerdict.giveValue)}</span>
                 </div>
                 <div className="space-y-1">
-                  {trade.offeredFruits.slice(0, 3).map((f, i) => (
+                  {userVerdict.giverFruits.slice(0, 3).map((f, i) => (
                     <div key={`off-${i}-${f.id}`} className="flex items-center gap-1.5 text-[11px] text-slate-200 font-game font-semibold">
                       <FruitImage fruit={f} size="xs" className="w-4 h-4 rounded-md flex-shrink-0" />
                       <span className="truncate">{f.name}</span>
                     </div>
                   ))}
-                  {trade.offeredFruits.length > 3 && (
-                    <div className="text-[9px] text-slate-500 font-mono">+{trade.offeredFruits.length - 3} more</div>
+                  {userVerdict.giverFruits.length > 3 && (
+                    <div className="text-[9px] text-slate-500 font-mono">+{userVerdict.giverFruits.length - 3} more</div>
                   )}
-                  {trade.offeredFruits.length === 0 && (
+                  {userVerdict.giverFruits.length === 0 && (
                     <div className="text-[9px] text-slate-600 font-mono italic">No fruits</div>
                   )}
                 </div>
               </div>
 
-              {/* Requested */}
+              {/* Received by Current User */}
               <div className="p-2.5 rounded-xl bg-[#0e1530]/80 border border-amber-500/20">
                 <div className="text-[9px] font-game font-bold text-amber-400 uppercase mb-1.5 flex justify-between">
                   <span>YOU RECEIVE</span>
-                  <span className="text-amber-400 font-mono">${formatMoney(trade.requestedTotalValue)}</span>
+                  <span className="text-emerald-400 font-mono">${formatMoney(userVerdict.receiveValue)}</span>
                 </div>
                 <div className="space-y-1">
-                  {trade.requestedFruits.slice(0, 3).map((f, i) => (
+                  {userVerdict.receiverFruits.slice(0, 3).map((f, i) => (
                     <div key={`req-${i}-${f.id}`} className="flex items-center gap-1.5 text-[11px] text-slate-200 font-game font-semibold">
                       <FruitImage fruit={f} size="xs" className="w-4 h-4 rounded-md flex-shrink-0" />
                       <span className="truncate">{f.name}</span>
                     </div>
                   ))}
-                  {trade.requestedFruits.length > 3 && (
-                    <div className="text-[9px] text-slate-500 font-mono">+{trade.requestedFruits.length - 3} more</div>
+                  {userVerdict.receiverFruits.length > 3 && (
+                    <div className="text-[9px] text-slate-500 font-mono">+{userVerdict.receiverFruits.length - 3} more</div>
                   )}
-                  {trade.requestedFruits.length === 0 && (
+                  {userVerdict.receiverFruits.length === 0 && (
                     <div className="text-[9px] text-slate-600 font-mono italic">No fruits</div>
                   )}
                 </div>
@@ -317,12 +324,11 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
             {/* Verdict + Calculator link */}
             <div className="flex items-center justify-between gap-2">
               <div className={`px-2.5 py-1 rounded-lg border text-[10px] font-game font-bold uppercase tracking-wider ${verdictColor}`}>
-                VERDICT: {trade.verdict}
-                <span className="text-[8px] font-mono font-normal opacity-60 ml-1">(creator view)</span>
+                YOUR VERDICT: {userVerdict.verdict}
               </div>
               {onLoadTradeInCalc && (
                 <button
-                  onClick={() => onLoadTradeInCalc(trade.offeredFruits, trade.requestedFruits)}
+                  onClick={() => onLoadTradeInCalc(userVerdict.giverFruits, userVerdict.receiverFruits)}
                   className="text-[9px] font-game font-bold text-purple-400 hover:text-purple-300 uppercase tracking-wider transition-colors"
                 >
                   OPEN IN CALC →
