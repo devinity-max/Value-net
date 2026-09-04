@@ -44,7 +44,7 @@ function mapDbSession(row: any, tradeAd?: TradeAd): TradeSession {
     requestedTotalValue: Number(row.requested_total_value || 0),
     verdict: row.verdict || 'FAIR',
     note: '',
-    status: 'IN_PROGRESS',
+    status: row.status || 'IN_PROGRESS',
     createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
   };
@@ -334,7 +334,7 @@ export async function apiAcceptTradeAd(
         ? JSON.parse(tradeAdRow.requested_fruits)
         : tradeAdRow.requested_fruits || [];
 
-    // 4. Insert a real trade_sessions row in Supabase (with fallback if optional columns missing in live DB)
+    // 4. Insert a real trade_sessions row in Supabase
     const fullSessionPayload: Record<string, any> = {
       trade_ad_id: tradeId,
       creator_id: tradeAdRow.creator_id,
@@ -413,7 +413,6 @@ export async function apiAcceptTradeAd(
 
     if (updateErr) {
       console.warn('trade_ads update after session insert error:', updateErr.message);
-      // Non-fatal: session was created; ad update failure is logged
     }
 
     // 6. Build the TradeAd for the session object
@@ -444,12 +443,14 @@ export async function apiAcceptTradeAd(
 }
 
 // ─── Get Active Trade Session for a User ─────────────────────────────────────
-// Used as tab-focus fallback to restore state without Realtime
+// Strictly retrieves ONLY sessions that are genuinely IN_PROGRESS and NOT terminal.
 export async function apiGetActiveSession(userId: string): Promise<{
   success: boolean;
   session?: TradeSession;
   error?: string;
 }> {
+  if (!userId || userId === 'local-trader') return { success: true };
+
   try {
     const { data: rows, error } = await supabase
       .from('trade_sessions')
@@ -457,53 +458,70 @@ export async function apiGetActiveSession(userId: string): Promise<{
       .eq('status', 'IN_PROGRESS')
       .or(`creator_id.eq.${userId},participant_id.eq.${userId}`)
       .order('created_at', { ascending: false })
-      .limit(1);
+      .limit(5);
 
     if (error) return { success: false, error: error.message };
-
     if (!rows || rows.length === 0) return { success: true };
 
-    const row = rows[0];
+    // Inspect candidate sessions defensively
+    for (const row of rows) {
+      // Exclude any terminal states
+      if (['CONFIRMED', 'COMPLETED', 'REJECTED', 'DECLINED', 'CLOSED', 'CANCELLED'].includes(row.status)) {
+        continue;
+      }
 
-    // Also fetch the trade_ad for full context
-    const { data: tradeAdRow } = await supabase
-      .from('trade_ads')
-      .select('*')
-      .eq('id', row.trade_ad_id)
-      .maybeSingle();
+      // Check the associated trade_ad status as well
+      const { data: tradeAdRow } = await supabase
+        .from('trade_ads')
+        .select('*')
+        .eq('id', row.trade_ad_id)
+        .maybeSingle();
 
-    let tradeAd: TradeAd | undefined;
-    if (tradeAdRow) {
-      const offeredFruits: Fruit[] =
-        typeof tradeAdRow.offered_fruits === 'string'
-          ? JSON.parse(tradeAdRow.offered_fruits)
-          : tradeAdRow.offered_fruits || [];
-      const requestedFruits: Fruit[] =
-        typeof tradeAdRow.requested_fruits === 'string'
-          ? JSON.parse(tradeAdRow.requested_fruits)
-          : tradeAdRow.requested_fruits || [];
-      tradeAd = {
-        id: tradeAdRow.id,
-        creatorId: tradeAdRow.creator_id,
-        creatorName: tradeAdRow.creator_name,
-        creatorAvatar: tradeAdRow.creator_avatar || 'person',
-        server: tradeAdRow.server || 'Second Sea (Cafe)',
-        offeredFruits,
-        requestedFruits,
-        offeredTotalValue: Number(tradeAdRow.offered_total_value || 0),
-        requestedTotalValue: Number(tradeAdRow.requested_total_value || 0),
-        verdict: tradeAdRow.verdict || 'FAIR',
-        note: tradeAdRow.note || '',
-        status: tradeAdRow.status,
-        sessionId: tradeAdRow.session_id,
-        acceptedBy: tradeAdRow.accepted_by,
-        acceptedByName: tradeAdRow.accepted_by_name,
-        createdAt: tradeAdRow.created_at ? new Date(tradeAdRow.created_at).getTime() : Date.now(),
-        updatedAt: tradeAdRow.updated_at ? new Date(tradeAdRow.updated_at).getTime() : Date.now(),
-      };
+      if (tradeAdRow && ['CANCELLED', 'CONFIRMED', 'COMPLETED', 'DECLINED', 'CLOSED'].includes(tradeAdRow.status)) {
+        // Trade Ad is already cancelled/completed — defensively sync trade_session status to REJECTED
+        await supabase
+          .from('trade_sessions')
+          .update({ status: 'REJECTED', closed_at: new Date().toISOString() })
+          .eq('id', row.id);
+        continue;
+      }
+
+      // Found a genuinely active IN_PROGRESS session
+      let tradeAd: TradeAd | undefined;
+      if (tradeAdRow) {
+        const offeredFruits: Fruit[] =
+          typeof tradeAdRow.offered_fruits === 'string'
+            ? JSON.parse(tradeAdRow.offered_fruits)
+            : tradeAdRow.offered_fruits || [];
+        const requestedFruits: Fruit[] =
+          typeof tradeAdRow.requested_fruits === 'string'
+            ? JSON.parse(tradeAdRow.requested_fruits)
+            : tradeAdRow.requested_fruits || [];
+        tradeAd = {
+          id: tradeAdRow.id,
+          creatorId: tradeAdRow.creator_id,
+          creatorName: tradeAdRow.creator_name,
+          creatorAvatar: tradeAdRow.creator_avatar || 'person',
+          server: tradeAdRow.server || 'Second Sea (Cafe)',
+          offeredFruits,
+          requestedFruits,
+          offeredTotalValue: Number(tradeAdRow.offered_total_value || 0),
+          requestedTotalValue: Number(tradeAdRow.requested_total_value || 0),
+          verdict: tradeAdRow.verdict || 'FAIR',
+          note: tradeAdRow.note || '',
+          status: tradeAdRow.status,
+          sessionId: tradeAdRow.session_id,
+          acceptedBy: tradeAdRow.accepted_by,
+          acceptedByName: tradeAdRow.accepted_by_name,
+          createdAt: tradeAdRow.created_at ? new Date(tradeAdRow.created_at).getTime() : Date.now(),
+          updatedAt: tradeAdRow.updated_at ? new Date(tradeAdRow.updated_at).getTime() : Date.now(),
+        };
+      }
+
+      return { success: true, session: mapDbSession(row, tradeAd) };
     }
 
-    return { success: true, session: mapDbSession(row, tradeAd) };
+    return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -618,7 +636,26 @@ export async function apiConfirmTradeSession(
       .select()
       .maybeSingle();
 
-    if (updateErr) return { success: false, error: updateErr.message };
+    if (updateErr || !updatedSession) {
+      console.warn('apiConfirmTradeSession update error/empty:', updateErr?.message);
+      // Verify in DB directly
+      const { data: verified } = await supabase
+        .from('trade_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (verified) {
+        if (otherConfirmed && currentSession.trade_ad_id) {
+          await supabase
+            .from('trade_ads')
+            .update({ status: 'CONFIRMED', updated_at: new Date().toISOString() })
+            .eq('id', currentSession.trade_ad_id);
+        }
+        return { success: true, session: mapDbSession(verified) };
+      }
+      return { success: false, error: updateErr?.message || 'Failed to update confirmation status.' };
+    }
 
     // Also update trade_ad status if both confirmed
     if (otherConfirmed && currentSession.trade_ad_id) {
@@ -628,18 +665,19 @@ export async function apiConfirmTradeSession(
         .eq('id', currentSession.trade_ad_id);
     }
 
-    return { success: true, session: updatedSession ? mapDbSession(updatedSession) : undefined };
+    return { success: true, session: mapDbSession(updatedSession) };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
 }
 
-// ─── Cancel / Close Trade Session ────────────────────────────────────────────
+// ─── Cancel / Decline Trade Session ──────────────────────────────────────────
 export async function apiCancelTradeSession(
   sessionId: string,
   tradeAdId: string
 ): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
   try {
+    // 1. Fetch current session first
     const { data: currentSession } = await supabase
       .from('trade_sessions')
       .select('*')
@@ -650,6 +688,7 @@ export async function apiCancelTradeSession(
       return { success: true, session: mapDbSession(currentSession) };
     }
 
+    // 2. Perform atomic database update to mark session as REJECTED
     const { data: updatedSession, error: sessErr } = await supabase
       .from('trade_sessions')
       .update({
@@ -661,6 +700,7 @@ export async function apiCancelTradeSession(
       .select()
       .maybeSingle();
 
+    // Also update trade_ads table status to CANCELLED
     if (tradeAdId) {
       await supabase
         .from('trade_ads')
@@ -668,9 +708,34 @@ export async function apiCancelTradeSession(
         .eq('id', tradeAdId);
     }
 
-    if (sessErr) return { success: false, error: sessErr.message };
+    // 3. Fallback verification if .select().maybeSingle() returned null or errored
+    if (sessErr || !updatedSession) {
+      console.warn('apiCancelTradeSession update error or empty select:', sessErr?.message);
+      
+      // Fallback simple update without select
+      await supabase
+        .from('trade_sessions')
+        .update({ status: 'REJECTED' })
+        .eq('id', sessionId);
 
-    return { success: true, session: updatedSession ? mapDbSession(updatedSession) : undefined };
+      // Verify row state directly
+      const { data: verifiedSession } = await supabase
+        .from('trade_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (verifiedSession) {
+        return { success: true, session: mapDbSession(verifiedSession) };
+      }
+
+      return {
+        success: false,
+        error: sessErr?.message || 'Failed to update session status in database.',
+      };
+    }
+
+    return { success: true, session: mapDbSession(updatedSession) };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -691,6 +756,14 @@ export async function apiCancelTradeAd(
     if (sbErr) {
       return { success: false, error: sbErr.message };
     }
+
+    // Also decline any associated trade_sessions
+    await supabase
+      .from('trade_sessions')
+      .update({ status: 'REJECTED', closed_at: new Date().toISOString() })
+      .eq('trade_ad_id', tradeId)
+      .eq('status', 'IN_PROGRESS');
+
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message || 'Failed to cancel trade.' };
