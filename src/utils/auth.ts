@@ -1,6 +1,6 @@
 import { AuthUser } from '../types';
 import { safeFetchJson } from './apiHelper';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, getCanonicalSiteUrl } from '../lib/supabaseClient';
 
 const AUTH_USER_STORAGE_KEY = 'valuenet_auth_user';
 
@@ -143,7 +143,7 @@ export async function apiSignup(
   usernameOrData: string | { username: string; email?: string; password?: string; displayName?: string },
   maybePassword?: string,
   maybeEmail?: string
-): Promise<{ success: boolean; user?: AuthUser; error?: string }> {
+): Promise<{ success: boolean; user?: AuthUser; confirmationRequired?: boolean; email?: string; message?: string; error?: string }> {
   let username = '';
   let email = '';
   let password = '';
@@ -164,10 +164,12 @@ export async function apiSignup(
   // Supabase Signup Direct Integration
   if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
     try {
+      const redirectUrl = `${getCanonicalSiteUrl()}/?auth=confirmed`;
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: redirectUrl,
           data: {
             username,
             displayName,
@@ -208,8 +210,21 @@ export async function apiSignup(
           },
         };
 
-        setStoredUser(authUser);
-        return { success: true, user: authUser };
+        // Determine if user is confirmed/authenticated immediately (Option A / Email Confirmation Disabled)
+        const isConfirmed = !!authData.user.email_confirmed_at || !!authData.session;
+        if (isConfirmed) {
+          setStoredUser(authUser);
+          return { success: true, user: authUser };
+        } else {
+          // Email confirmation is required by Supabase Auth configuration (Option B)
+          return {
+            success: true,
+            user: authUser,
+            confirmationRequired: true,
+            email,
+            message: 'Account created! Check your email inbox to confirm your account before signing in.',
+          };
+        }
       } else if (authErr) {
         console.warn('Supabase Signup error:', authErr.message);
         return { success: false, error: authErr.message || 'Failed to create account.' };
@@ -242,6 +257,31 @@ export async function apiSignup(
 }
 
 export const apiRegister = apiSignup;
+
+export async function apiResendConfirmationEmail(
+  email: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
+    try {
+      const redirectUrl = `${getCanonicalSiteUrl()}/?auth=confirmed`;
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: {
+          emailRedirectTo: redirectUrl,
+        },
+      });
+      if (!error) {
+        return { success: true, message: 'Confirmation email sent! Please check your inbox.' };
+      } else {
+        return { success: false, error: error.message };
+      }
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to resend confirmation email.' };
+    }
+  }
+  return { success: false, error: 'Authentication service not available.' };
+}
 
 export async function apiLogout(): Promise<void> {
   if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
@@ -303,11 +343,18 @@ export async function apiForgotPassword(
 ): Promise<{ success: boolean; message?: string; code?: string; error?: string }> {
   if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      const redirectUrl = `${getCanonicalSiteUrl()}/?auth=recovery`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectUrl,
+      });
       if (!error) {
         return { success: true, message: 'Password reset instructions sent to your email.' };
+      } else {
+        return { success: false, error: error.message };
       }
-    } catch {}
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to request password reset.' };
+    }
   }
 
   const res = await safeFetchJson<{ success: boolean; message?: string; code?: string; error?: string }>(

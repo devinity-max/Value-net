@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuthUser } from '../types';
-import { apiLogin, apiRegister } from '../utils/auth';
+import { apiLogin, apiRegister, apiResendConfirmationEmail } from '../utils/auth';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -15,12 +15,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [resendEmail, setResendEmail] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setInfoMessage(null);
     setLoading(true);
 
     try {
@@ -34,7 +38,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         }
       } else {
         const res = await apiRegister(username.trim(), password, email.trim() || undefined);
-        if (res.success && res.user) {
+        if (res.success && res.confirmationRequired) {
+          setInfoMessage(res.message || 'Account created! Please check your email to confirm your account before logging in.');
+          setResendEmail(email.trim() || null);
+          setMode('login');
+        } else if (res.success && res.user) {
           onSuccess(res.user);
           onClose();
         } else {
@@ -45,6 +53,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!resendEmail) return;
+    setResending(true);
+    setError(null);
+    try {
+      const res = await apiResendConfirmationEmail(resendEmail);
+      if (res.success) {
+        setInfoMessage(res.message || 'Confirmation email resent! Please check your inbox.');
+      } else {
+        setError(res.error || 'Failed to resend confirmation email.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to resend confirmation email.');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -79,6 +105,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               : 'Join over 10,000+ Blox Fruits traders.'}
           </p>
         </div>
+
+        {infoMessage && (
+          <div className="p-3 mb-4 rounded-xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-base text-amber-400">mark_email_read</span>
+              <span>{infoMessage}</span>
+            </div>
+            {resendEmail && (
+              <button
+                onClick={handleResend}
+                disabled={resending}
+                className="text-[11px] text-amber-400 hover:text-amber-300 font-bold underline self-start cursor-pointer disabled:opacity-50"
+              >
+                {resending ? 'Sending...' : `Resend confirmation link to ${resendEmail}`}
+              </button>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="p-3 mb-4 rounded-xl bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300">
@@ -144,7 +188,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             <div>
               Don't have an account yet?{' '}
               <button
-                onClick={() => setMode('register')}
+                onClick={() => {
+                  setInfoMessage(null);
+                  setError(null);
+                  setMode('register');
+                }}
                 className="text-amber-400 font-bold hover:underline"
               >
                 Register Free
@@ -154,7 +202,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             <div>
               Already have an account?{' '}
               <button
-                onClick={() => setMode('login')}
+                onClick={() => {
+                  setInfoMessage(null);
+                  setError(null);
+                  setMode('login');
+                }}
                 className="text-amber-400 font-bold hover:underline"
               >
                 Sign In

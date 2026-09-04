@@ -40,6 +40,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { getStoredUser, apiGetMe, apiLogout } from './utils/auth';
 import { apiGetSystemHealth, SystemHealthMetrics } from './utils/systemStatus';
 import { AdSlot } from './components/ads/AdSlot';
+import { supabase } from './lib/supabaseClient';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('calculator');
@@ -111,6 +112,47 @@ export default function App() {
     };
     syncUser();
 
+    // Subscribe to Supabase auth events (e.g. returning from email confirmation or password recovery)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const me = await apiGetMe();
+        if (me) {
+          setCurrentUser(me);
+          setViewingProfileUsername(me.username);
+        }
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          if (window.location.search.includes('auth=confirmed') || window.location.hash.includes('type=signup')) {
+            showToast('✅ Email confirmed successfully! Welcome to VALUE.NET.', 'success');
+            window.history.replaceState(null, '', window.location.pathname);
+          } else if (window.location.search.includes('auth=recovery') || window.location.hash.includes('type=recovery')) {
+            showToast('🔑 Account recovery verified! You can now update your password in Settings.', 'info');
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }
+      }
+    });
+
+    // Handle authentication error hashes (e.g. expired confirmation links)
+    const hash = window.location.hash;
+    const search = window.location.search;
+    if (hash.includes('error=') || search.includes('error=')) {
+      const params = new URLSearchParams(hash.replace('#', '?') || search);
+      const errCode = params.get('error_code') || params.get('error');
+      const errDesc = params.get('error_description')?.replace(/\+/g, ' ') || 'Authentication link failed or expired.';
+
+      if (errCode === 'otp_expired' || errDesc.toLowerCase().includes('expired')) {
+        showToast('⚠️ Email confirmation link has expired. Please sign in or request a new one.', 'error');
+      } else if (errCode === 'access_denied' || errDesc.toLowerCase().includes('invalid')) {
+        showToast('⚠️ Confirmation link is invalid or already used. Please sign in.', 'error');
+      } else {
+        showToast(`⚠️ Auth Error: ${errDesc}`, 'error');
+      }
+      window.history.replaceState(null, '', window.location.pathname);
+    } else if (search.includes('auth=confirmed') && !hash) {
+      showToast('✅ Email confirmed! Please sign in to continue.', 'success');
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
     // Check URL parameters for tab routing
     try {
       const params = new URLSearchParams(window.location.search);
@@ -124,6 +166,10 @@ export default function App() {
         setViewingProfileUsername(userParam);
       }
     } catch (e) {}
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Ledger State
