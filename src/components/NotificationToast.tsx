@@ -40,18 +40,25 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
     info: 'info',
   };
 
+  // "Open Chamber" action button should ONLY appear for genuine active acceptance toasts
+  const showOpenChamber =
+    notification &&
+    notification.sessionId &&
+    notification.type === 'acceptance' &&
+    onOpenSession;
+
   return (
     <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <div
         className={`flex items-center gap-3 px-4 py-3 rounded-xl border backdrop-blur-md shadow-2xl ${bgStyles[activeToast.type]}`}
       >
         <span className="material-symbols-outlined text-xl">{icons[activeToast.type]}</span>
-        <div className="text-sm font-semibold tracking-wide">
-          {activeToast.message}
-          {notification?.sessionId && onOpenSession && (
+        <div className="text-sm font-semibold tracking-wide flex items-center gap-2">
+          <span>{activeToast.message}</span>
+          {showOpenChamber && (
             <button
               onClick={() => onOpenSession(notification.sessionId!)}
-              className="ml-2 underline font-bold text-amber-300 hover:text-amber-200 text-xs"
+              className="ml-1.5 underline font-bold text-amber-300 hover:text-amber-200 text-xs cursor-pointer flex-shrink-0"
             >
               Open Chamber &rarr;
             </button>
