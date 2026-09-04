@@ -109,9 +109,11 @@ export async function apiLogin(
         return { success: true, user: authUser };
       } else if (authErr) {
         console.warn('Supabase Auth response:', authErr.message);
+        return { success: false, error: authErr.message || 'Invalid username/email or password.' };
       }
-    } catch (sbErr) {
+    } catch (sbErr: any) {
       console.warn('Supabase Auth error:', sbErr);
+      return { success: false, error: sbErr?.message || 'Authentication error occurred.' };
     }
   }
 
@@ -123,9 +125,13 @@ export async function apiLogin(
   });
 
   if (!res.success || !res.data?.success || !res.data.user) {
+    const rawError = res.data?.error || res.error || 'Invalid username/email or password.';
+    const sanitizedError = rawError.includes('500') || rawError.includes('HTTP')
+      ? 'Invalid username/email or password.'
+      : rawError;
     return {
       success: false,
-      error: res.data?.error || res.error || 'Invalid username/email or password.',
+      error: sanitizedError,
     };
   }
 
@@ -204,9 +210,13 @@ export async function apiSignup(
 
         setStoredUser(authUser);
         return { success: true, user: authUser };
+      } else if (authErr) {
+        console.warn('Supabase Signup error:', authErr.message);
+        return { success: false, error: authErr.message || 'Failed to create account.' };
       }
-    } catch (sbErr) {
-      console.warn('Supabase Signup fallback:', sbErr);
+    } catch (sbErr: any) {
+      console.warn('Supabase Signup error:', sbErr);
+      return { success: false, error: sbErr?.message || 'Failed to create account.' };
     }
   }
 
@@ -217,9 +227,13 @@ export async function apiSignup(
   });
 
   if (!res.success || !res.data?.success || !res.data.user) {
+    const rawError = res.data?.error || res.error || 'Failed to create account.';
+    const sanitizedError = rawError.includes('500') || rawError.includes('HTTP')
+      ? 'Failed to create account. Please check your information and try again.'
+      : rawError;
     return {
       success: false,
-      error: res.data?.error || res.error || 'Failed to create account.',
+      error: sanitizedError,
     };
   }
 

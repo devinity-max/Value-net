@@ -244,11 +244,14 @@ export async function apiAcceptTradeAd(
   participant: { id: string; username: string; avatarUrl?: string }
 ): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
   try {
-    // 1. Derive participant_id from trusted Supabase auth session
+    // 1. Derive participant_id from trusted Supabase auth session or stored user
     const { data: authData } = await supabase.auth.getUser();
     let participantId = authData?.user?.id;
     if (!participantId || !isValidUUID(participantId)) {
-      if (participant && participant.id && isValidUUID(participant.id)) {
+      const storedUser = getStoredUser();
+      if (storedUser && storedUser.id && isValidUUID(storedUser.id)) {
+        participantId = storedUser.id;
+      } else if (participant && participant.id && isValidUUID(participant.id)) {
         participantId = participant.id;
       }
     }

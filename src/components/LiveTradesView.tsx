@@ -3,6 +3,7 @@ import { Fruit, TradeAd, TradeSession, TradeMessage, TradeNotification, TraderPr
 import { formatMoney, getTradeVerdictForUser } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
 import { getStoredTraderProfile, saveTraderProfile } from '../utils/traderProfile';
+import { getStoredUser } from '../utils/auth';
 import { CreateTradeModal } from './CreateTradeModal';
 import { TradeChatPanel } from './TradeChatPanel';
 import { TraderProfileModal } from './TraderProfileModal';
@@ -15,6 +16,7 @@ import {
   apiGetActiveSession,
   apiConfirmTradeSession,
   apiCancelTradeSession,
+  isValidUUID,
 } from '../utils/tradesApi';
 import { TrustBadge } from './TrustBadge';
 import { AdSlot } from './ads/AdSlot';
@@ -262,15 +264,52 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
 
 
 
+  // ── Sync user profile with stored auth user if available ────────────────
+  useEffect(() => {
+    const syncUser = () => {
+      const stored = getStoredUser();
+      if (stored && stored.id && isValidUUID(stored.id)) {
+        setCurrentUser((prev) => ({
+          ...prev,
+          id: stored.id,
+          username: stored.username || prev.username,
+          displayName: stored.displayName || prev.displayName,
+          avatarIcon: stored.avatarUrl || prev.avatarIcon || 'person',
+        }));
+      }
+    };
+    syncUser();
+    window.addEventListener('storage', syncUser);
+    return () => window.removeEventListener('storage', syncUser);
+  }, []);
+
   // ── Accept Trade (creates real persisted session) ─────────────────────────
   const handleAcceptTrade = async (trade: TradeAd) => {
     setActionError(null);
     playClickSound();
 
-    const { data: authData } = await supabase.auth.getUser();
-    const authenticatedId = authData?.user?.id;
+    let authenticatedId: string | null = null;
+    let usernameToUse = currentUser.username;
 
-    if (!authenticatedId) {
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData?.user?.id && isValidUUID(authData.user.id)) {
+      authenticatedId = authData.user.id;
+      usernameToUse = authData.user.user_metadata?.username || currentUser.username;
+    } else {
+      const storedUser = getStoredUser();
+      if (storedUser && storedUser.id && isValidUUID(storedUser.id)) {
+        authenticatedId = storedUser.id;
+        usernameToUse = storedUser.username || currentUser.username;
+      } else if (currentUser.id && isValidUUID(currentUser.id)) {
+        authenticatedId = currentUser.id;
+        usernameToUse = currentUser.username;
+      }
+    }
+
+    if (!authenticatedId || !isValidUUID(authenticatedId)) {
+      try {
+        sessionStorage.setItem('valuenet_pending_accept_trade', trade.id);
+      } catch {}
       setActionError('You must be logged in to accept trade advertisements.');
       if (onOpenAuth) onOpenAuth();
       return;
@@ -287,7 +326,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     try {
       const res = await apiAcceptTradeAd(trade.id, {
         id: authenticatedId,
-        username: authData.user?.user_metadata?.username || currentUser.username,
+        username: usernameToUse,
         avatarUrl: currentUser.avatarIcon,
       });
 
@@ -295,11 +334,14 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
         playSelectSound();
         setActiveSession(res.session);
         setSessionMessages([]);
+        try {
+          sessionStorage.removeItem('valuenet_pending_accept_trade');
+        } catch {}
         // Optimistically update local trade list
         setTrades((prev) =>
           prev.map((t) =>
             t.id === trade.id
-              ? { ...t, status: 'IN_PROGRESS', acceptedBy: authenticatedId, acceptedByName: currentUser.username, sessionId: res.session!.id }
+              ? { ...t, status: 'IN_PROGRESS', acceptedBy: authenticatedId, acceptedByName: usernameToUse, sessionId: res.session!.id }
               : t
           )
         );
@@ -312,6 +354,25 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
       setIsAccepting(null);
     }
   };
+
+  // ── Auto-resume pending trade acceptance post-login ───────────────────────
+  useEffect(() => {
+    try {
+      const pendingTradeId = sessionStorage.getItem('valuenet_pending_accept_trade');
+      if (!pendingTradeId) return;
+
+      const storedUser = getStoredUser();
+      const isUserAuth = (storedUser && storedUser.id && isValidUUID(storedUser.id)) || isValidUUID(currentUser.id);
+
+      if (isUserAuth && trades.length > 0) {
+        const pendingTrade = trades.find((t) => t.id === pendingTradeId);
+        if (pendingTrade && pendingTrade.status === 'ACTIVE') {
+          sessionStorage.removeItem('valuenet_pending_accept_trade');
+          handleAcceptTrade(pendingTrade);
+        }
+      }
+    } catch {}
+  }, [trades, currentUser.id]);
 
 
 
