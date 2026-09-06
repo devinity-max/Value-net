@@ -11,7 +11,7 @@ export interface TradeChatPanelProps {
   currentUser: TraderProfile | AuthUser | null;
   messages?: TradeMessage[];
   onSessionUpdate?: (session: TradeSession) => void;
-  onConfirmTrade?: (sessionId: string) => void;
+  onDoneTrade?: (sessionId: string, reason?: string) => void;
   onRejectTrade?: (sessionId: string, reason?: string) => void;
   onClosePanel?: () => void;
   onLoadTradeInCalc?: (offered: any[], requested: any[]) => void;
@@ -24,7 +24,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
   session,
   currentUser,
   messages: initialMessages = [],
-  onConfirmTrade,
+  onDoneTrade,
   onRejectTrade,
   onClosePanel,
   onLoadTradeInCalc,
@@ -34,8 +34,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const [isDeclining, setIsDeclining] = useState(false);
+  const [isDoneLoading, setIsDoneLoading] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -43,6 +42,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const msgListRef = useRef<HTMLDivElement>(null);
   const handleClose = onClosePanel || onClose;
+  const handleEndSession = onDoneTrade || onRejectTrade;
 
   // SSR / Hydration protection
   useEffect(() => {
@@ -159,18 +159,11 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
     }
   };
 
-  const handleConfirm = async () => {
-    if (!session || !onConfirmTrade || isConfirming) return;
-    setIsConfirming(true);
-    onConfirmTrade(session.id);
-    setIsConfirming(false);
-  };
-
-  const handleDecline = async () => {
-    if (!session || !onRejectTrade || isDeclining) return;
-    setIsDeclining(true);
-    onRejectTrade(session.id, 'Declined by trader');
-    setIsDeclining(false);
+  const handleDone = async () => {
+    if (!session || !handleEndSession || isDoneLoading) return;
+    setIsDoneLoading(true);
+    handleEndSession(session.id, 'Session ended by trader');
+    setIsDoneLoading(false);
   };
 
   if (!session || !mounted) return null;
@@ -186,13 +179,6 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
   );
   const isActive = session.status === 'IN_PROGRESS';
 
-  const myConfirmed = isCreator
-    ? (session.creatorConfirmed ?? false)
-    : (session.participantConfirmed ?? false);
-  const otherConfirmed = isCreator
-    ? (session.participantConfirmed ?? false)
-    : (session.creatorConfirmed ?? false);
-
   const userVerdict = getTradeVerdictForUser(
     trade?.offeredFruits || [],
     trade?.requestedFruits || [],
@@ -207,7 +193,6 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
       className="fixed pointer-events-none"
       style={{
         zIndex: 1000,
-        // Responsive viewport placement (mobile: bottom: 10px, left: 10px, right: 10px | desktop: bottom: 20px, right: 20px)
         inset: 'auto 10px 10px 10px',
       }}
     >
@@ -242,7 +227,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
                 TRADE CHAT: @{counterpartName}
               </div>
               <div className="text-[9px] font-game text-amber-400 uppercase tracking-wider">
-                {isActive ? (myConfirmed ? 'Waiting for trader...' : 'Negotiating') : session.status}
+                {isActive ? 'Negotiating' : 'Session Ended'}
               </div>
             </div>
           </div>
@@ -256,7 +241,6 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
         <div
           className="pointer-events-auto ml-auto flex flex-col bg-[#080d1c] border border-purple-500/35 rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.8),0_0_30px_rgba(168,85,247,0.15)] overflow-hidden animate-in slide-in-from-bottom-3 duration-200"
           style={{
-            // Size: Mobile (full width - 20px, max 400px, height 480px) | Desktop (380px wide, 500px height)
             width: 'min(380px, calc(100vw - 20px))',
             height: 'min(500px, calc(100dvh - 24px))',
           }}
@@ -285,7 +269,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
                         Active Deal
                       </span>
                     ) : (
-                      <span>{session.status}</span>
+                      <span>Session Ended</span>
                     )}
                   </div>
                 </div>
@@ -321,9 +305,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
             <div
               className={`flex items-center justify-between px-2.5 py-1 rounded-lg border text-[9px] font-game font-bold uppercase tracking-wider ${
                 isClosed
-                  ? ['CONFIRMED', 'COMPLETED'].includes(session.status)
-                    ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
-                    : 'bg-rose-950/70 border-rose-500/40 text-rose-300'
+                  ? 'bg-purple-950/70 border-purple-500/40 text-purple-300'
                   : 'bg-amber-950/50 border-amber-500/30 text-amber-300'
               }`}
             >
@@ -331,26 +313,18 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
                 <span
                   className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                     isClosed
-                      ? ['CONFIRMED', 'COMPLETED'].includes(session.status)
-                        ? 'bg-emerald-400'
-                        : 'bg-rose-400'
+                      ? 'bg-purple-400'
                       : 'bg-amber-400 animate-pulse'
                   }`}
                 />
                 <span className="truncate">
                   {session.status === 'IN_PROGRESS'
-                    ? myConfirmed
-                      ? 'Waiting for trader...'
-                      : otherConfirmed
-                      ? 'Counterpart confirmed!'
-                      : 'Negotiation Active'
-                    : ['CONFIRMED', 'COMPLETED'].includes(session.status)
-                    ? 'Trade Confirmed ✓'
-                    : 'Trade Declined'}
+                    ? 'Negotiation Active'
+                    : 'Trade Session Ended'}
                 </span>
               </span>
               <span className="text-[8px] font-mono opacity-50 flex-shrink-0">
-                {shortSessionId}
+                #{shortSessionId}
               </span>
             </div>
           </div>
@@ -464,7 +438,7 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
                   No messages yet
                 </p>
                 <p className="text-[8px] text-slate-700 font-sans mt-0.5">
-                  Send a message or share join link
+                  Send a message to start negotiating
                 </p>
               </div>
             ) : (
@@ -507,34 +481,20 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
             <div ref={messagesEndRef} />
           </div>
 
-          {/* ── TERMINAL STATE CARD (COMPLETED or DECLINED) ─────────── */}
+          {/* ── TERMINAL STATE CARD (SESSION ENDED) ─────────── */}
           {isClosed && (
             <div className="flex-shrink-0 mx-2.5 my-2 p-3 rounded-xl border border-purple-500/30 bg-gradient-to-b from-[#0e1633] to-[#080d1c] text-center shadow-lg animate-in zoom-in-95">
-              {['CONFIRMED', 'COMPLETED'].includes(session.status) ? (
-                <div>
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 mx-auto mb-1.5">
-                    <span className="material-symbols-outlined text-lg font-bold">verified</span>
-                  </div>
-                  <h4 className="font-game font-black text-xs text-emerald-300 uppercase tracking-wider mb-0.5">
-                    TRADE COMPLETED
-                  </h4>
-                  <p className="text-[10px] text-slate-300 font-sans leading-tight mb-2.5">
-                    Both traders confirmed the exchange.
-                  </p>
+              <div>
+                <div className="w-8 h-8 rounded-full bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-purple-300 mx-auto mb-1.5">
+                  <span className="material-symbols-outlined text-lg font-bold">task_alt</span>
                 </div>
-              ) : (
-                <div>
-                  <div className="w-8 h-8 rounded-full bg-rose-500/20 border border-rose-400/40 flex items-center justify-center text-rose-400 mx-auto mb-1.5">
-                    <span className="material-symbols-outlined text-lg font-bold">cancel</span>
-                  </div>
-                  <h4 className="font-game font-black text-xs text-rose-300 uppercase tracking-wider mb-0.5">
-                    TRADE DECLINED
-                  </h4>
-                  <p className="text-[10px] text-slate-300 font-sans leading-tight mb-2.5">
-                    This trade session was declined.
-                  </p>
-                </div>
-              )}
+                <h4 className="font-game font-black text-xs text-purple-200 uppercase tracking-wider mb-0.5">
+                  TRADE NEGOTIATION ENDED
+                </h4>
+                <p className="text-[10px] text-slate-300 font-sans leading-tight mb-2.5">
+                  This temporary trade negotiation has ended.
+                </p>
+              </div>
               {handleClose && (
                 <button
                   onClick={handleClose}
@@ -547,38 +507,16 @@ export const TradeChatPanel: React.FC<TradeChatPanelProps> = ({
           )}
 
           {/* ── ACTION BAR (IN_PROGRESS Only) ───────────────────────── */}
-          {isActive && (onConfirmTrade || onRejectTrade) && (
-            <div className="flex-shrink-0 px-3 py-2 bg-[#080d1c] border-t border-purple-500/15 flex gap-2">
-              {onRejectTrade && (
-                <button
-                  onClick={handleDecline}
-                  disabled={isDeclining || isConfirming}
-                  className="flex-1 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-200 font-game font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-sm"
-                >
-                  {isDeclining ? 'DECLINING...' : 'DECLINE'}
-                </button>
-              )}
-              {onConfirmTrade && (
-                <button
-                  onClick={handleConfirm}
-                  disabled={isConfirming || isDeclining || myConfirmed}
-                  className={`flex-1 py-2 rounded-xl font-game font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95 disabled:opacity-60 cursor-pointer ${
-                    myConfirmed
-                      ? 'bg-purple-950/80 border border-purple-500/40 text-purple-300'
-                      : otherConfirmed
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md animate-pulse'
-                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm'
-                  }`}
-                >
-                  {isConfirming
-                    ? 'CONFIRMING...'
-                    : myConfirmed
-                    ? '✓ WAITING...'
-                    : otherConfirmed
-                    ? 'CONFIRM (1/2)'
-                    : 'CONFIRM TRADE'}
-                </button>
-              )}
+          {isActive && handleEndSession && (
+            <div className="flex-shrink-0 px-3 py-2 bg-[#080d1c] border-t border-purple-500/15">
+              <button
+                onClick={handleDone}
+                disabled={isDoneLoading}
+                className="w-full py-2 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:from-purple-500 hover:to-indigo-500 text-white font-game font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-md flex items-center justify-center gap-1.5 border border-purple-400/30"
+              >
+                <span className="material-symbols-outlined text-sm">check_circle</span>
+                <span>{isDoneLoading ? 'ENDING SESSION...' : 'DONE'}</span>
+              </button>
             </div>
           )}
 

@@ -14,7 +14,6 @@ import {
   apiAcceptTradeAd,
   apiCancelTradeAd,
   apiGetActiveSession,
-  apiConfirmTradeSession,
   apiCancelTradeSession,
   isValidUUID,
 } from '../utils/tradesApi';
@@ -469,40 +468,18 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     }
   };
 
-  // ── Confirm Trade ─────────────────────────────────────────────────────────
-  const handleConfirmTrade = async (sessionId: string) => {
-    if (!activeSession) return;
-    const role = currentUser.id === activeSession.creatorId ? 'creator' : 'participant';
-    const res = await apiConfirmTradeSession(sessionId, currentUser.id, role);
-    if (res.success && res.session) {
-      setActiveSession(res.session);
-      if (['CONFIRMED', 'COMPLETED'].includes(res.session.status)) {
-        setToastNotification({
-          id: `notif-completed-${res.session.id}`,
-          userId: currentUser.id,
-          title: '🎉 Trade Completed!',
-          message: 'Both traders confirmed the exchange.',
-          type: 'confirmed',
-          sessionId: res.session.id,
-          createdAt: Date.now(),
-          read: false,
-        });
-      }
-    }
-  };
-
-  // ── Reject / Decline Trade ────────────────────────────────────────────────
-  const handleRejectTrade = async (sessionId: string, _reason?: string) => {
+  // ── End / Done Trade Negotiation Session ──────────────────────────────────
+  const handleDoneTrade = async (sessionId: string, _reason?: string) => {
     if (!activeSession) return;
     const res = await apiCancelTradeSession(sessionId, activeSession.tradeId);
     if (res.success && res.session) {
       setActiveSession(res.session);
       setToastNotification({
-        id: `notif-declined-${res.session.id}`,
+        id: `notif-ended-${res.session.id}`,
         userId: currentUser.id,
-        title: '✕ Trade Declined',
-        message: 'The trade session was declined.',
-        type: 'rejected',
+        title: '✓ Trade Session Ended',
+        message: 'The trade negotiation session has ended.',
+        type: 'confirmed',
         sessionId: res.session.id,
         createdAt: Date.now(),
         read: false,
@@ -905,8 +882,7 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
           session={activeSession}
           currentUser={currentUser}
           messages={sessionMessages}
-          onConfirmTrade={handleConfirmTrade}
-          onRejectTrade={handleRejectTrade}
+          onDoneTrade={handleDoneTrade}
           onClosePanel={() => setActiveSession(null)}
           onLoadTradeInCalc={(off, req) => onLoadTrade(off, req)}
         />

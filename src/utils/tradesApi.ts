@@ -242,7 +242,7 @@ export async function apiGetTradeAds(): Promise<{
 export async function apiAcceptTradeAd(
   tradeId: string,
   participant: { id: string; username: string; avatarUrl?: string }
-): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
+): Promise<{ success: boolean; session?: TradeSession; error?: string; code?: string }> {
   try {
     // 1. Derive participant_id from Supabase Auth — use getSession() FIRST so the
     //    SDK can silently refresh an expired access token via the refresh token.
@@ -334,6 +334,50 @@ export async function apiAcceptTradeAd(
 
     if (tradeAdRow.creator_id === participantId) {
       return { success: false, error: 'You cannot accept your own trade advertisement.' };
+    }
+
+    // 2.5 BUSY-TRADER CONCURRENCY PROTECTION
+    // Rule: ONE USER = MAXIMUM ONE ACTIVE TRADE SESSION (status = 'IN_PROGRESS')
+    // A. Check if current user (accepter) is already in an active session
+    const { data: accepterActiveSessions } = await supabase
+      .from('trade_sessions')
+      .select('id, status')
+      .eq('status', 'IN_PROGRESS')
+      .or(`creator_id.eq.${participantId},participant_id.eq.${participantId}`)
+      .limit(1);
+
+    if (accepterActiveSessions && accepterActiveSessions.length > 0) {
+      return {
+        success: false,
+        code: 'USER_BUSY',
+        error: "You're currently busy on another trade.",
+      };
+    }
+
+    // B. Check if the Trade Ad creator is already in an active session
+    const creatorId = tradeAdRow.creator_id;
+    const creatorName = tradeAdRow.creator_name ? `@${tradeAdRow.creator_name}` : 'Trader';
+
+    const { data: creatorActiveAds } = await supabase
+      .from('trade_ads')
+      .select('id, status')
+      .eq('status', 'IN_PROGRESS')
+      .or(`creator_id.eq.${creatorId},accepted_by.eq.${creatorId}`)
+      .limit(1);
+
+    const { data: creatorActiveSessions } = await supabase
+      .from('trade_sessions')
+      .select('id, status')
+      .eq('status', 'IN_PROGRESS')
+      .or(`creator_id.eq.${creatorId},participant_id.eq.${creatorId}`)
+      .limit(1);
+
+    if ((creatorActiveAds && creatorActiveAds.length > 0) || (creatorActiveSessions && creatorActiveSessions.length > 0)) {
+      return {
+        success: false,
+        code: 'USER_BUSY',
+        error: `${creatorName} is busy on another trade.`,
+      };
     }
 
     // 3. Parse trade fruits for the session row
