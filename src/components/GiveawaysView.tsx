@@ -10,6 +10,7 @@ import {
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
 import { canHostGiveaways } from '../utils/permissions';
+import { supabase } from '../lib/supabaseClient';
 import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
 import { ParticipantsModal } from './ParticipantsModal';
@@ -63,7 +64,34 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
   useEffect(() => {
     loadGiveaways();
-  }, [filter, search]);
+
+    // Subscribe to realtime database changes for giveaways & entries
+    const channel = supabase
+      .channel('public_giveaways_view')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'giveaways' },
+        () => {
+          loadGiveaways();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'giveaway_entries' },
+        () => {
+          loadGiveaways();
+        }
+      )
+      .subscribe();
+
+    const onFocus = () => loadGiveaways();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [filter, search, currentUser?.id]);
 
   // Join or Leave Giveaway
   const handleToggleJoin = async (gw: GiveawayItem) => {

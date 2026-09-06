@@ -38,45 +38,77 @@ export async function apiGetGiveaways(params?: {
     }
     const { data: dbGiveaways, error: sbErr } = await query;
 
+    if (sbErr) {
+      console.warn('[GIVEAWAYS] Supabase giveaways query error:', sbErr.message);
+    }
+
     if (!sbErr && dbGiveaways && dbGiveaways.length > 0) {
-      list = dbGiveaways.map((gw: any) => ({
-        id: gw.id,
-        hostId: gw.host_id,
-        hostName: gw.host_name,
-        hostDisplayName: gw.host_display_name || gw.host_name,
-        hostAvatar: gw.host_avatar || 'person',
-        hostTitle: gw.host_title || 'host',
-        hostRole: gw.host_role || 'MEMBER',
-        hostBadges: typeof gw.host_badges === 'string' ? JSON.parse(gw.host_badges) : (gw.host_badges || []),
-        title: gw.title,
-        description: gw.description || '',
-        prizes: typeof gw.prizes === 'string' ? JSON.parse(gw.prizes) : (gw.prizes || []),
-        rules: typeof gw.rules === 'string' ? JSON.parse(gw.rules) : (gw.rules || []),
-        eligibility: typeof gw.eligibility === 'string' ? JSON.parse(gw.eligibility) : (gw.eligibility || {}),
-        status: (gw.status || 'ACTIVE') as GiveawayStatus,
-        startsAt: gw.starts_at ? new Date(gw.starts_at).getTime() : Date.now(),
-        endsAt: gw.ends_at ? new Date(gw.ends_at).getTime() : Date.now() + 86400000,
-        maxParticipants: gw.max_participants,
-        participantCount: gw.participant_count || 0,
-        allowLeave: gw.allow_leave ?? true,
-        createdAt: gw.created_at ? new Date(gw.created_at).getTime() : Date.now(),
-        updatedAt: gw.updated_at ? new Date(gw.updated_at).getTime() : Date.now(),
-        winnerId: gw.winner_id,
-        winnerUsername: gw.winner_username,
-        winnerDisplayName: gw.winner_display_name,
-        winnerAvatar: gw.winner_avatar,
-        completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
-        youtubeBoostEnabled: !!gw.youtube_boost_enabled,
-        youtubeVideoId: gw.youtube_video_id,
-        youtubeBoostPercentage: Number(gw.youtube_boost_percentage || 0),
-        youtubeRedemptionCount: Number(gw.youtube_redemption_count || 0),
-      }));
+      // Check current user's entries to determine hasJoined and hasUserBoosted
+      const currentUser = getStoredUser();
+      const userEntriesMap = new Map<string, { isBoosted: boolean }>();
+
+      if (currentUser && currentUser.id) {
+        try {
+          const { data: userEntries, error: entryErr } = await supabase
+            .from('giveaway_entries')
+            .select('giveaway_id, is_boosted')
+            .eq('user_id', currentUser.id);
+
+          if (!entryErr && userEntries) {
+            userEntries.forEach((e: any) => {
+              userEntriesMap.set(e.giveaway_id, { isBoosted: !!e.is_boosted });
+            });
+          }
+        } catch (e) {
+          console.warn('[GIVEAWAYS] Failed to fetch user entries:', e);
+        }
+      }
+
+      list = dbGiveaways.map((gw: any) => {
+        const userEntry = userEntriesMap.get(gw.id);
+        const statusVal = (gw.status || 'ACTIVE').toUpperCase() as GiveawayStatus;
+
+        return {
+          id: gw.id,
+          hostId: gw.host_id,
+          hostName: gw.host_name,
+          hostDisplayName: gw.host_display_name || gw.host_name,
+          hostAvatar: gw.host_avatar || 'person',
+          hostTitle: gw.host_title || 'host',
+          hostRole: gw.host_role || 'MEMBER',
+          hostBadges: typeof gw.host_badges === 'string' ? JSON.parse(gw.host_badges) : (gw.host_badges || []),
+          title: gw.title,
+          description: gw.description || '',
+          prizes: typeof gw.prizes === 'string' ? JSON.parse(gw.prizes) : (gw.prizes || []),
+          rules: typeof gw.rules === 'string' ? JSON.parse(gw.rules) : (gw.rules || []),
+          eligibility: typeof gw.eligibility === 'string' ? JSON.parse(gw.eligibility) : (gw.eligibility || {}),
+          status: statusVal,
+          startsAt: gw.starts_at ? new Date(gw.starts_at).getTime() : Date.now(),
+          endsAt: gw.ends_at ? new Date(gw.ends_at).getTime() : Date.now() + 86400000,
+          maxParticipants: gw.max_participants,
+          participantCount: gw.participant_count || 0,
+          allowLeave: gw.allow_leave ?? true,
+          createdAt: gw.created_at ? new Date(gw.created_at).getTime() : Date.now(),
+          updatedAt: gw.updated_at ? new Date(gw.updated_at).getTime() : Date.now(),
+          winnerId: gw.winner_id,
+          winnerUsername: gw.winner_username,
+          winnerDisplayName: gw.winner_display_name,
+          winnerAvatar: gw.winner_avatar,
+          completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
+          hasJoined: !!userEntry,
+          hasUserBoosted: userEntry?.isBoosted ?? false,
+          youtubeBoostEnabled: !!gw.youtube_boost_enabled,
+          youtubeVideoId: gw.youtube_video_id,
+          youtubeBoostPercentage: Number(gw.youtube_boost_percentage || 0),
+          youtubeRedemptionCount: Number(gw.youtube_redemption_count || 0),
+        };
+      });
     }
   } catch (err) {
     console.warn('Supabase giveaways fetch error:', err);
   }
 
-  // Combine with local persisted cache (deduplicate by ID)
+  // Combine with local persisted cache (deduplicate by ID, preferring DB data if present)
   const map = new Map<string, GiveawayItem>();
   localGiveawaysCache.forEach((g) => map.set(g.id, g));
   list.forEach((g) => map.set(g.id, g));
@@ -88,12 +120,18 @@ export async function apiGetGiveaways(params?: {
     combined = combined.filter((g) => g.hostId === params.hostId);
   }
 
-  // Filter by status filter
+  // Filter by status filter (case-insensitive & robust)
   const f = params?.filter;
   if (f === 'ACTIVE') {
-    combined = combined.filter((g) => g.status === 'ACTIVE' || g.status === 'DRAFT' || g.status === 'SCHEDULED');
+    combined = combined.filter((g) => {
+      const st = (g.status || 'ACTIVE').toUpperCase();
+      return st === 'ACTIVE' || st === 'DRAFT' || st === 'SCHEDULED' || st === 'LIVE' || st === 'OPEN' || st === 'PUBLISHED';
+    });
   } else if (f === 'ENDED') {
-    combined = combined.filter((g) => g.status === 'ENDED' || g.status === 'COMPLETED' || g.status === 'CANCELLED');
+    combined = combined.filter((g) => {
+      const st = (g.status || '').toUpperCase();
+      return st === 'ENDED' || st === 'COMPLETED' || st === 'CANCELLED' || st === 'CLOSED';
+    });
   } else if (f?.startsWith('user:')) {
     const uid = f.split('user:')[1];
     combined = combined.filter((g) => g.hostId === uid);
@@ -106,7 +144,7 @@ export async function apiGetGiveaways(params?: {
       (g) =>
         g.title.toLowerCase().includes(q) ||
         g.description.toLowerCase().includes(q) ||
-        g.hostName.toLowerCase().includes(q)
+        (g.hostName && g.hostName.toLowerCase().includes(q))
     );
   }
 
@@ -122,11 +160,6 @@ export async function apiGetGiveaway(id: string): Promise<{
   giveaway?: GiveawayItem;
   error?: string;
 }> {
-  const localMatch = localGiveawaysCache.find((g) => g.id === id);
-  if (localMatch) {
-    return { success: true, giveaway: localMatch };
-  }
-
   try {
     const { data: gw, error: sbErr } = await supabase
       .from('giveaways')
@@ -135,6 +168,24 @@ export async function apiGetGiveaway(id: string): Promise<{
       .maybeSingle();
 
     if (!sbErr && gw) {
+      const currentUser = getStoredUser();
+      let hasJoined = false;
+      let hasUserBoosted = false;
+
+      if (currentUser && currentUser.id) {
+        const { data: entry } = await supabase
+          .from('giveaway_entries')
+          .select('is_boosted')
+          .eq('giveaway_id', id)
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+
+        if (entry) {
+          hasJoined = true;
+          hasUserBoosted = !!entry.is_boosted;
+        }
+      }
+
       return {
         success: true,
         giveaway: {
@@ -151,7 +202,7 @@ export async function apiGetGiveaway(id: string): Promise<{
           prizes: typeof gw.prizes === 'string' ? JSON.parse(gw.prizes) : (gw.prizes || []),
           rules: typeof gw.rules === 'string' ? JSON.parse(gw.rules) : (gw.rules || []),
           eligibility: typeof gw.eligibility === 'string' ? JSON.parse(gw.eligibility) : (gw.eligibility || {}),
-          status: (gw.status || 'ACTIVE') as GiveawayStatus,
+          status: (gw.status || 'ACTIVE').toUpperCase() as GiveawayStatus,
           startsAt: gw.starts_at ? new Date(gw.starts_at).getTime() : Date.now(),
           endsAt: gw.ends_at ? new Date(gw.ends_at).getTime() : Date.now() + 86400000,
           maxParticipants: gw.max_participants,
@@ -164,6 +215,8 @@ export async function apiGetGiveaway(id: string): Promise<{
           winnerDisplayName: gw.winner_display_name,
           winnerAvatar: gw.winner_avatar,
           completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
+          hasJoined,
+          hasUserBoosted,
           youtubeBoostEnabled: !!gw.youtube_boost_enabled,
           youtubeVideoId: gw.youtube_video_id,
           youtubeBoostPercentage: Number(gw.youtube_boost_percentage || 0),
@@ -172,6 +225,11 @@ export async function apiGetGiveaway(id: string): Promise<{
       };
     }
   } catch {}
+
+  const localMatch = localGiveawaysCache.find((g) => g.id === id);
+  if (localMatch) {
+    return { success: true, giveaway: localMatch };
+  }
 
   return { success: false, error: 'Giveaway not found' };
 }
