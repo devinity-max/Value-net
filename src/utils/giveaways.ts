@@ -1,7 +1,7 @@
 import { GiveawayItem, GiveawayEntry, GiveawayReport, GiveawayStatus } from '../types';
 import { supabase } from '../lib/supabaseClient';
 import { getStoredUser } from './auth';
-import { generateUUID } from './tradesApi';
+import { generateUUID, isValidUUID } from './tradesApi';
 
 const STORAGE_KEY = 'valuenet_local_giveaways';
 
@@ -259,23 +259,43 @@ export async function apiCreateGiveaway(payload: {
     };
   }
 
+  // Derive host_id strictly from active Supabase Auth session so auth.uid() matches host_id
+  const { data: sessionData } = await supabase.auth.getSession();
+  let authenticatedId: string | null = sessionData?.session?.user?.id ?? null;
+
+  if (!authenticatedId || !isValidUUID(authenticatedId)) {
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData?.user?.id && isValidUUID(authData.user.id)) {
+      authenticatedId = authData.user.id;
+    } else {
+      authenticatedId = user.id;
+    }
+  }
+
+  if (!authenticatedId || !isValidUUID(authenticatedId)) {
+    return {
+      success: false,
+      error: 'Please sign in with a valid account to host giveaways.',
+    };
+  }
+
   const id = generateUUID();
 
   const createdItem: GiveawayItem = {
     id,
-    hostId: user?.id || 'devness',
-    hostName: user?.username || 'devness',
-    hostDisplayName: user?.displayName || user?.username || 'devness',
-    hostAvatar: user?.avatarUrl || 'person',
-    hostTitle: 'ROOT_OWNER',
-    hostRole: user?.role || 'ROOT_OWNER',
+    hostId: authenticatedId,
+    hostName: user.username || 'host',
+    hostDisplayName: user.displayName || user.username || 'host',
+    hostAvatar: user.avatarUrl || 'person',
+    hostTitle: user.role || 'APPROVED_CREATOR',
+    hostRole: user.role || 'APPROVED_CREATOR',
     hostBadges: [],
     title: payload.title,
     description: payload.description || '',
     prizes: payload.prizes || [],
     rules: payload.rules || [],
     eligibility: payload.eligibility || {},
-    status: (payload.status || 'ACTIVE') as GiveawayStatus,
+    status: (payload.status || 'ACTIVE').toUpperCase() as GiveawayStatus,
     startsAt: payload.startsAt || Date.now(),
     endsAt: payload.endsAt || Date.now() + 86400000,
     maxParticipants: payload.maxParticipants || null,
@@ -289,56 +309,70 @@ export async function apiCreateGiveaway(payload: {
     youtubeRedemptionCount: 0,
   };
 
-  // 1. Immediately cache & persist in local storage
-  localGiveawaysCache = [createdItem, ...localGiveawaysCache];
-  saveStoredLocalGiveaways(localGiveawaysCache);
+  // Attempt Supabase DB insert
+  const dbPayload: Record<string, any> = {
+    id,
+    host_id: authenticatedId,
+    host_name: user.username || 'host',
+    host_display_name: user.displayName || user.username || 'host',
+    host_avatar: user.avatarUrl || 'person',
+    title: payload.title,
+    description: payload.description || '',
+    prizes: JSON.stringify(payload.prizes || []),
+    rules: JSON.stringify(payload.rules || []),
+    eligibility: JSON.stringify(payload.eligibility || {}),
+    status: (payload.status || 'ACTIVE').toUpperCase(),
+    starts_at: payload.startsAt ? new Date(payload.startsAt).toISOString() : new Date().toISOString(),
+    ends_at: payload.endsAt ? new Date(payload.endsAt).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+    max_participants: payload.maxParticipants || null,
+    participant_count: 0,
+    allow_leave: payload.allowLeave ?? true,
+    youtube_boost_enabled: !!payload.youtubeBoostEnabled,
+    youtube_video_id: payload.youtubeVideoId || null,
+    youtube_boost_percentage: payload.youtubeBoostPercentage || 10,
+  };
 
-  // 2. Insert into Supabase DB (with JSON stringification for PostgreSQL compatibility)
-  try {
-    const dbPayload: Record<string, any> = {
-      id,
-      host_id: user?.id || 'devness',
-      host_name: user?.username || 'devness',
-      host_display_name: user?.displayName || user?.username || 'devness',
-      host_avatar: user?.avatarUrl || 'person',
-      title: payload.title,
-      description: payload.description || '',
-      prizes: JSON.stringify(payload.prizes || []),
-      rules: JSON.stringify(payload.rules || []),
-      eligibility: JSON.stringify(payload.eligibility || {}),
-      status: payload.status || 'ACTIVE',
-      starts_at: payload.startsAt ? new Date(payload.startsAt).toISOString() : new Date().toISOString(),
-      ends_at: payload.endsAt ? new Date(payload.endsAt).toISOString() : new Date(Date.now() + 86400000).toISOString(),
-      max_participants: payload.maxParticipants || null,
-      participant_count: 0,
-      allow_leave: payload.allowLeave ?? true,
-      youtube_boost_enabled: !!payload.youtubeBoostEnabled,
-      youtube_video_id: payload.youtubeVideoId || null,
-      youtube_boost_percentage: payload.youtubeBoostPercentage || 10,
+  let { data: dbGw, error: sbErr } = await supabase
+    .from('giveaways')
+    .insert(dbPayload)
+    .select()
+    .maybeSingle();
+
+  // Fallback retry if JSON column format or optional column caused issue
+  if (sbErr && (sbErr.message?.includes('youtube') || sbErr.message?.includes('json') || sbErr.message?.includes('schema'))) {
+    console.warn('[GIVEAWAYS] Retrying insert with array prizes:', sbErr.message);
+    const retryPayload = {
+      ...dbPayload,
+      prizes: payload.prizes || [],
+      rules: payload.rules || [],
+      eligibility: payload.eligibility || {},
     };
-
-    const { data: dbGw, error: sbErr } = await supabase
+    const res2 = await supabase
       .from('giveaways')
-      .insert(dbPayload)
+      .insert(retryPayload)
       .select()
       .maybeSingle();
-
-    if (sbErr) {
-      console.warn('Supabase createGiveaway insert error:', sbErr.message);
-    } else if (dbGw) {
-      const dbCreated: GiveawayItem = {
-        ...createdItem,
-        id: dbGw.id,
-      };
-      localGiveawaysCache = localGiveawaysCache.map((g) => (g.id === id ? dbCreated : g));
-      saveStoredLocalGiveaways(localGiveawaysCache);
-      return { success: true, giveaway: dbCreated };
-    }
-  } catch (err: any) {
-    console.warn('Supabase createGiveaway DB fallback:', err);
+    dbGw = res2.data;
+    sbErr = res2.error;
   }
 
-  return { success: true, giveaway: createdItem };
+  if (sbErr || !dbGw) {
+    console.error('[GIVEAWAYS] Database insert failed:', sbErr?.message);
+    return {
+      success: false,
+      error: sbErr?.message || 'Failed to persist giveaway in database.',
+    };
+  }
+
+  // Update local cache ONLY after DB insert succeeds
+  const dbCreated: GiveawayItem = {
+    ...createdItem,
+    id: dbGw.id,
+  };
+  localGiveawaysCache = [dbCreated, ...localGiveawaysCache];
+  saveStoredLocalGiveaways(localGiveawaysCache);
+
+  return { success: true, giveaway: dbCreated };
 }
 
 export async function apiUpdateGiveaway(
