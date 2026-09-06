@@ -6,6 +6,14 @@
 ALTER TABLE giveaways ENABLE ROW LEVEL SECURITY;
 ALTER TABLE giveaway_entries ENABLE ROW LEVEL SECURITY;
 
+-- Ensure additive columns exist safely if missing
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS host_avatar TEXT DEFAULT 'person';
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS host_display_name TEXT;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_boost_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_video_id TEXT;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_boost_percentage NUMERIC DEFAULT 10;
+ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS youtube_redemption_count INT DEFAULT 0;
+
 -- ----------------------------------------------------------------
 -- 1. giveaways RLS Policies
 -- ----------------------------------------------------------------

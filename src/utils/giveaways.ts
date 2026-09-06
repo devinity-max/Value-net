@@ -315,7 +315,6 @@ export async function apiCreateGiveaway(payload: {
     host_id: authenticatedId,
     host_name: user.username || 'host',
     host_display_name: user.displayName || user.username || 'host',
-    host_avatar: user.avatarUrl || 'person',
     title: payload.title,
     description: payload.description || '',
     prizes: JSON.stringify(payload.prizes || []),
