@@ -549,9 +549,6 @@ export async function apiJoinGiveaway(
     id: entryId,
     giveaway_id: giveawayId,
     user_id: authUserId,
-    username: user.username,
-    display_name: user.displayName,
-    avatar_url: user.avatarUrl,
     joined_at: new Date().toISOString(),
   });
 
@@ -657,13 +654,35 @@ export async function apiDrawGiveawayWinner(
 
     if (entries && entries.length > 0) {
       const winner = entries[Math.floor(Math.random() * entries.length)];
+      let winnerProfile: { username: string; displayName: string; avatarUrl: string } | null = null;
+      if (winner.user_id) {
+        try {
+          const { data: p } = await supabase
+            .from('profiles')
+            .select('username, display_name, avatar_url')
+            .eq('id', winner.user_id)
+            .maybeSingle();
+          if (p) {
+            winnerProfile = {
+              username: p.username || 'member',
+              displayName: p.display_name || p.username || 'member',
+              avatarUrl: p.avatar_url || 'person',
+            };
+          }
+        } catch {}
+      }
+
+      const resolvedWinnerUsername = winnerProfile?.username || 'member';
+      const resolvedWinnerDisplayName = winnerProfile?.displayName || resolvedWinnerUsername;
+      const resolvedWinnerAvatar = winnerProfile?.avatarUrl || 'person';
+
       await supabase
         .from('giveaways')
         .update({
           winner_id: winner.user_id,
-          winner_username: winner.username,
-          winner_display_name: winner.display_name,
-          winner_avatar: winner.avatar_url,
+          winner_username: resolvedWinnerUsername,
+          winner_display_name: resolvedWinnerDisplayName,
+          winner_avatar: resolvedWinnerAvatar,
           status: 'COMPLETED',
           completed_at: new Date().toISOString(),
         })
@@ -672,8 +691,13 @@ export async function apiDrawGiveawayWinner(
       const gwRes = await apiGetGiveaway(giveawayId);
       return {
         success: true,
-        message: `Winner drawn: @${winner.username}!`,
-        winner,
+        message: `Winner drawn: @${resolvedWinnerUsername}!`,
+        winner: {
+          ...winner,
+          username: resolvedWinnerUsername,
+          display_name: resolvedWinnerDisplayName,
+          avatar_url: resolvedWinnerAvatar,
+        },
         giveaway: gwRes.giveaway,
       };
     }
@@ -729,19 +753,46 @@ export async function apiGetGiveawayParticipants(
       .select('*')
       .eq('giveaway_id', giveawayId);
 
-    if (entries) {
-      const formatted: GiveawayEntry[] = entries.map((e: any) => ({
-        id: e.id,
-        giveawayId: e.giveaway_id,
-        userId: e.user_id,
-        username: e.username,
-        displayName: e.display_name,
-        avatarUrl: e.avatar_url || 'person',
-        joinedAt: new Date(e.joined_at).getTime(),
-        eligibilityState: 'ELIGIBLE',
-        isBoosted: !!e.is_boosted,
-        weight: e.weight || 1,
-      }));
+    if (entries && entries.length > 0) {
+      const userIds = Array.from(new Set(entries.map((e: any) => e.user_id).filter(Boolean)));
+      const profileMap = new Map<string, { username: string; displayName: string; avatarUrl: string }>();
+
+      if (userIds.length > 0) {
+        try {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username, display_name, avatar_url')
+            .in('id', userIds);
+
+          if (profiles) {
+            profiles.forEach((p: any) => {
+              profileMap.set(p.id, {
+                username: p.username || 'member',
+                displayName: p.display_name || p.username || 'member',
+                avatarUrl: p.avatar_url || 'person',
+              });
+            });
+          }
+        } catch (e) {
+          console.warn('[GIVEAWAYS] Failed to resolve participant profiles:', e);
+        }
+      }
+
+      const formatted: GiveawayEntry[] = entries.map((e: any) => {
+        const userProfile = profileMap.get(e.user_id);
+        return {
+          id: e.id,
+          giveawayId: e.giveaway_id,
+          userId: e.user_id,
+          username: userProfile?.username || 'member',
+          displayName: userProfile?.displayName || userProfile?.username || 'member',
+          avatarUrl: userProfile?.avatarUrl || 'person',
+          joinedAt: e.joined_at ? new Date(e.joined_at).getTime() : Date.now(),
+          eligibilityState: 'ELIGIBLE',
+          isBoosted: !!e.is_boosted,
+          weight: e.weight || 1,
+        };
+      });
       return {
         success: true,
         participants: formatted,
