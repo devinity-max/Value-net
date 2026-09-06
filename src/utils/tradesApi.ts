@@ -244,19 +244,36 @@ export async function apiAcceptTradeAd(
   participant: { id: string; username: string; avatarUrl?: string }
 ): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
   try {
-    // 1. Strictly derive participant_id from active Supabase auth session to satisfy RLS (auth.uid() = participant_id)
-    const { data: authData, error: authErr } = await supabase.auth.getUser();
-    const sbUser = authData?.user;
+    // 1. Derive participant_id from Supabase Auth — use getSession() FIRST so the
+    //    SDK can silently refresh an expired access token via the refresh token.
+    //    Only if getSession() itself returns nothing is the session truly gone.
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
 
-    if (authErr || !sbUser || !sbUser.id || !isValidUUID(sbUser.id)) {
-      console.warn('apiAcceptTradeAd: User is not authenticated in Supabase Auth.', authErr?.message);
-      return {
-        success: false,
-        error: 'Your session has expired. Please sign in again to accept trade advertisements.',
-      };
+    if (sessionErr) {
+      console.warn('[TRADE] getSession error:', sessionErr.message);
     }
 
-    const participantId = sbUser.id; // Guaranteed auth.uid() match
+    let participantId: string | null = null;
+
+    if (sessionData?.session?.user?.id && isValidUUID(sessionData.session.user.id)) {
+      // Session is valid (may have just been refreshed by the SDK automatically)
+      participantId = sessionData.session.user.id;
+      console.log('[TRADE] Auth: session valid, user authenticated:', true);
+    } else {
+      // Session missing or invalid — attempt explicit getUser() as last resort
+      // (handles edge cases where session storage is partially cleared)
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (!authErr && authData?.user?.id && isValidUUID(authData.user.id)) {
+        participantId = authData.user.id;
+        console.log('[TRADE] Auth: recovered user via getUser()');
+      } else {
+        console.warn('[TRADE] Auth: no valid session or user found. sessionErr:', sessionErr?.message, '| authErr:', authErr?.message);
+        return {
+          success: false,
+          error: 'Please sign in to accept trade advertisements.',
+        };
+      }
+    }
 
     // 2. Fetch the Trade Ad first to check eligibility and get creator info
     const { data: tradeAdRow, error: fetchErr } = await supabase
@@ -349,7 +366,7 @@ export async function apiAcceptTradeAd(
     };
 
     let newSession: any = null;
-    let sessionErr: any = null;
+    let insertErr: any = null;
 
     const res = await supabase
       .from('trade_sessions')
@@ -358,11 +375,11 @@ export async function apiAcceptTradeAd(
       .maybeSingle();
 
     newSession = res.data;
-    sessionErr = res.error;
+    insertErr = res.error;
 
     // Fallback: If live DB trade_sessions table lacks offered_fruits column, insert core columns only
-    if (sessionErr && (sessionErr.message?.includes('offered_fruits') || sessionErr.message?.includes('schema cache'))) {
-      console.warn('trade_sessions table lacks fruit metadata columns — retrying insert with core columns:', sessionErr.message);
+    if (insertErr && (insertErr.message?.includes('offered_fruits') || insertErr.message?.includes('schema cache'))) {
+      console.warn('trade_sessions table lacks fruit metadata columns — retrying insert with core columns:', insertErr.message);
       const corePayload = {
         trade_ad_id: tradeId,
         creator_id: tradeAdRow.creator_id,
@@ -383,13 +400,13 @@ export async function apiAcceptTradeAd(
         .maybeSingle();
 
       newSession = fallbackRes.data;
-      sessionErr = fallbackRes.error;
+      insertErr = fallbackRes.error;
     }
 
-    if (sessionErr || !newSession) {
+    if (insertErr || !newSession) {
       return {
         success: false,
-        error: sessionErr?.message || 'Failed to create trade session.',
+        error: insertErr?.message || 'Failed to create trade session.',
       };
     }
 

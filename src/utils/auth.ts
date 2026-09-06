@@ -524,14 +524,26 @@ export async function apiGetMe(): Promise<AuthUser | null> {
   const stored = getStoredUser();
   if (import.meta.env.VITE_SUPABASE_URL && !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')) {
     try {
-      const { data: { user: sbUser } } = await supabase.auth.getUser();
-      if (sbUser) {
-        const usernameFallback = stored?.username || sbUser.email?.split('@')[0] || 'user';
+      // Use getSession() first — the Supabase SDK auto-refreshes expired access tokens
+      // using the refresh token before we inspect the user. This prevents false
+      // "no authenticated user" results when only the access token has expired.
+      const { data: { session } } = await supabase.auth.getSession();
+      const sbUser = session?.user ?? null;
+
+      // If no session, fall back to getUser() as a last-resort (handles split-state cases)
+      let resolvedUser = sbUser;
+      if (!resolvedUser) {
+        const { data: { user: directUser } } = await supabase.auth.getUser();
+        resolvedUser = directUser ?? null;
+      }
+
+      if (resolvedUser) {
+        const usernameFallback = stored?.username || resolvedUser.email?.split('@')[0] || 'user';
 
         // Ensure profile exists defensively
-        const profileRes = await apiEnsureProfile(sbUser.id, {
+        const profileRes = await apiEnsureProfile(resolvedUser.id, {
           username: usernameFallback,
-          email: sbUser.email || '',
+          email: resolvedUser.email || '',
           displayName: usernameFallback,
         });
 
@@ -539,10 +551,10 @@ export async function apiGetMe(): Promise<AuthUser | null> {
 
         if (userProfile) {
           const authUser: AuthUser = {
-            id: sbUser.id,
+            id: resolvedUser.id,
             username: userProfile.username || usernameFallback,
             displayName: userProfile.display_name || userProfile.username || usernameFallback,
-            email: sbUser.email || '',
+            email: resolvedUser.email || '',
             avatarUrl: userProfile.avatar_url || 'person',
             token: stored?.token || 'sb-token',
             role: (userProfile.role as any) || 'MEMBER',

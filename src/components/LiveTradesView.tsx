@@ -3,7 +3,7 @@ import { Fruit, TradeAd, TradeSession, TradeMessage, TradeNotification, TraderPr
 import { formatMoney, getTradeVerdictForUser } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
 import { getStoredTraderProfile, saveTraderProfile } from '../utils/traderProfile';
-import { getStoredUser, apiGetMe } from '../utils/auth';
+import { getStoredUser } from '../utils/auth';
 import { CreateTradeModal } from './CreateTradeModal';
 import { TradeChatPanel } from './TradeChatPanel';
 import { TraderProfileModal } from './TraderProfileModal';
@@ -366,44 +366,47 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
 
   // ── Accept Trade (creates real persisted session) ─────────────────────────
   const handleAcceptTrade = async (trade: TradeAd) => {
+    if (isAccepting) return; // Prevent double-click before async work
     setActionError(null);
+    setIsAccepting(trade.id); // Disable button immediately — before async checks
     playClickSound();
 
-    let authenticatedId: string | null = null;
-    let usernameToUse = currentUser.username;
-
-    // Strictly verify active Supabase Auth session so auth.uid() is guaranteed to match participant_id
-    const { data: authData } = await supabase.auth.getUser();
-    if (authData?.user?.id && isValidUUID(authData.user.id)) {
-      authenticatedId = authData.user.id;
-      usernameToUse = authData.user.user_metadata?.username || currentUser.username;
-    } else {
-      // Re-check session using apiGetMe() defensively
-      const me = await apiGetMe();
-      if (me?.id && isValidUUID(me.id)) {
-        authenticatedId = me.id;
-        usernameToUse = me.username;
-      }
-    }
-
-    if (!authenticatedId || !isValidUUID(authenticatedId)) {
-      try {
-        sessionStorage.setItem('valuenet_pending_accept_trade', trade.id);
-      } catch {}
-      setActionError('You must be logged in to accept trade advertisements.');
-      if (onOpenAuth) onOpenAuth();
-      return;
-    }
-
-    if (trade.creatorId === authenticatedId) {
-      setActionError('You cannot accept your own trade advertisement.');
-      return;
-    }
-
-    if (isAccepting) return; // prevent double-click
-    setIsAccepting(trade.id);
-
     try {
+      // Use getSession() FIRST — the Supabase SDK will automatically use the
+      // refresh token to obtain a new access token if the current one has expired.
+      // This is the correct way to handle token refresh without forcing sign-out.
+      const { data: sessionData } = await supabase.auth.getSession();
+      let authenticatedId: string | null = null;
+      let usernameToUse = currentUser.username;
+
+      if (sessionData?.session?.user?.id && isValidUUID(sessionData.session.user.id)) {
+        authenticatedId = sessionData.session.user.id;
+        usernameToUse =
+          sessionData.session.user.user_metadata?.username ||
+          currentUser.username;
+      } else {
+        // Fallback: try getUser() in case session storage is in a split state
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id && isValidUUID(authData.user.id)) {
+          authenticatedId = authData.user.id;
+          usernameToUse = authData.user.user_metadata?.username || currentUser.username;
+        }
+      }
+
+      if (!authenticatedId || !isValidUUID(authenticatedId)) {
+        try {
+          sessionStorage.setItem('valuenet_pending_accept_trade', trade.id);
+        } catch {}
+        setActionError('Please sign in to accept trade advertisements.');
+        if (onOpenAuth) onOpenAuth();
+        return;
+      }
+
+      if (trade.creatorId === authenticatedId) {
+        setActionError('You cannot accept your own trade advertisement.');
+        return;
+      }
+
       const res = await apiAcceptTradeAd(trade.id, {
         id: authenticatedId,
         username: usernameToUse,
@@ -428,12 +431,11 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
       } else {
         setActionError(res.error || 'Trade is no longer available or was accepted by another user.');
       }
-    } catch (err: any) {
-      setActionError(err.message || 'Failed to accept trade.');
     } finally {
       setIsAccepting(null);
     }
   };
+
 
   // ── Auto-resume pending trade acceptance post-login ───────────────────────
   useEffect(() => {
