@@ -244,24 +244,19 @@ export async function apiAcceptTradeAd(
   participant: { id: string; username: string; avatarUrl?: string }
 ): Promise<{ success: boolean; session?: TradeSession; error?: string }> {
   try {
-    // 1. Derive participant_id from trusted Supabase auth session or stored user
-    const { data: authData } = await supabase.auth.getUser();
-    let participantId = authData?.user?.id;
-    if (!participantId || !isValidUUID(participantId)) {
-      const storedUser = getStoredUser();
-      if (storedUser && storedUser.id && isValidUUID(storedUser.id)) {
-        participantId = storedUser.id;
-      } else if (participant && participant.id && isValidUUID(participant.id)) {
-        participantId = participant.id;
-      }
-    }
+    // 1. Strictly derive participant_id from active Supabase auth session to satisfy RLS (auth.uid() = participant_id)
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    const sbUser = authData?.user;
 
-    if (!participantId || !isValidUUID(participantId)) {
+    if (authErr || !sbUser || !sbUser.id || !isValidUUID(sbUser.id)) {
+      console.warn('apiAcceptTradeAd: User is not authenticated in Supabase Auth.', authErr?.message);
       return {
         success: false,
-        error: 'You must be logged in to accept trade advertisements.',
+        error: 'Your session has expired. Please sign in again to accept trade advertisements.',
       };
     }
+
+    const participantId = sbUser.id; // Guaranteed auth.uid() match
 
     // 2. Fetch the Trade Ad first to check eligibility and get creator info
     const { data: tradeAdRow, error: fetchErr } = await supabase

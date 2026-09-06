@@ -3,7 +3,7 @@ import { Fruit, TradeAd, TradeSession, TradeMessage, TradeNotification, TraderPr
 import { formatMoney, getTradeVerdictForUser } from '../utils/calc';
 import { playClickSound, playSelectSound } from '../utils/audio';
 import { getStoredTraderProfile, saveTraderProfile } from '../utils/traderProfile';
-import { getStoredUser } from '../utils/auth';
+import { getStoredUser, apiGetMe } from '../utils/auth';
 import { CreateTradeModal } from './CreateTradeModal';
 import { TradeChatPanel } from './TradeChatPanel';
 import { TraderProfileModal } from './TraderProfileModal';
@@ -372,18 +372,17 @@ export const LiveTradesView: React.FC<LiveTradesViewProps> = ({ onLoadTrade, onV
     let authenticatedId: string | null = null;
     let usernameToUse = currentUser.username;
 
+    // Strictly verify active Supabase Auth session so auth.uid() is guaranteed to match participant_id
     const { data: authData } = await supabase.auth.getUser();
     if (authData?.user?.id && isValidUUID(authData.user.id)) {
       authenticatedId = authData.user.id;
       usernameToUse = authData.user.user_metadata?.username || currentUser.username;
     } else {
-      const storedUser = getStoredUser();
-      if (storedUser && storedUser.id && isValidUUID(storedUser.id)) {
-        authenticatedId = storedUser.id;
-        usernameToUse = storedUser.username || currentUser.username;
-      } else if (currentUser.id && isValidUUID(currentUser.id)) {
-        authenticatedId = currentUser.id;
-        usernameToUse = currentUser.username;
+      // Re-check session using apiGetMe() defensively
+      const me = await apiGetMe();
+      if (me?.id && isValidUUID(me.id)) {
+        authenticatedId = me.id;
+        usernameToUse = me.username;
       }
     }
 
