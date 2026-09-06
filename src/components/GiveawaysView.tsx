@@ -108,6 +108,16 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
       if (res.success) {
         playClickSound();
         onShowToast('Left giveaway entry pool.', 'info');
+        // Immediately reflect the DB-backed count while full refetch happens in background
+        if (res.participantCount !== undefined) {
+          setGiveaways((prev) =>
+            prev.map((g) =>
+              g.id === gw.id
+                ? { ...g, hasJoined: false, hasUserBoosted: false, participantCount: res.participantCount! }
+                : g
+            )
+          );
+        }
         loadGiveaways();
       } else {
         onShowToast(res.error || 'Failed to leave giveaway.', 'error');
@@ -117,6 +127,16 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
       if (res.success) {
         playSuccessSound();
         onShowToast(res.message || 'Successfully entered giveaway! Good luck!', 'success');
+        // Immediately reflect the DB-backed count while full refetch happens in background
+        if (res.participantCount !== undefined) {
+          setGiveaways((prev) =>
+            prev.map((g) =>
+              g.id === gw.id
+                ? { ...g, hasJoined: true, participantCount: res.participantCount! }
+                : g
+            )
+          );
+        }
         loadGiveaways();
       } else {
         onShowToast(res.error || 'Failed to enter giveaway.', 'error');

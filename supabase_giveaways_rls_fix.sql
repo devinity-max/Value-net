@@ -6,6 +6,10 @@
 ALTER TABLE giveaways ENABLE ROW LEVEL SECURITY;
 ALTER TABLE giveaway_entries ENABLE ROW LEVEL SECURITY;
 
+-- Ensure one entry per user per giveaway at DB level (additive, safe for existing data)
+ALTER TABLE giveaway_entries DROP CONSTRAINT IF EXISTS giveaway_entries_unique_user;
+ALTER TABLE giveaway_entries ADD CONSTRAINT giveaway_entries_unique_user UNIQUE (giveaway_id, user_id);
+
 -- ----------------------------------------------------------------
 -- 1. giveaways RLS Policies
 -- ----------------------------------------------------------------

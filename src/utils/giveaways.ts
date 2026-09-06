@@ -536,27 +536,45 @@ export async function apiUpdateGiveaway(
 export async function apiJoinGiveaway(
   giveawayId: string
 ): Promise<{ success: boolean; message?: string; participantCount?: number; hasJoined?: boolean; error?: string }> {
-  try {
-    const user = getStoredUser();
-    if (!user) return { success: false, error: 'Must be logged in to enter giveaways.' };
+  const user = getStoredUser();
+  if (!user) return { success: false, error: 'Must be logged in to enter giveaways.' };
 
-    const entryId = `entry-${giveawayId}-${user.id}`;
-    const { error: sbErr } = await supabase.from('giveaway_entries').insert({
-      id: entryId,
-      giveaway_id: giveawayId,
-      user_id: user.id,
-      username: user.username,
-      display_name: user.displayName,
-      avatar_url: user.avatarUrl,
-      joined_at: new Date().toISOString(),
-    });
+  // Always use the active Supabase Auth session user ID so auth.uid() matches user_id for RLS
+  const { data: sessionData } = await supabase.auth.getSession();
+  const authUserId: string = sessionData?.session?.user?.id || user.id;
 
-    if (!sbErr) {
-      return { success: true, message: 'Successfully joined giveaway!', hasJoined: true };
+  const entryId = `entry-${giveawayId}-${authUserId}`;
+
+  const { error: sbErr } = await supabase.from('giveaway_entries').insert({
+    id: entryId,
+    giveaway_id: giveawayId,
+    user_id: authUserId,
+    username: user.username,
+    display_name: user.displayName,
+    avatar_url: user.avatarUrl,
+    joined_at: new Date().toISOString(),
+  });
+
+  if (sbErr) {
+    // Duplicate entry (unique violation) means user already entered
+    if (sbErr.code === '23505' || sbErr.message?.includes('duplicate') || sbErr.message?.includes('unique')) {
+      return { success: false, hasJoined: true, error: 'You have already entered this giveaway.' };
     }
+    console.error('[GIVEAWAYS] Failed to insert entry:', sbErr.message, sbErr.code);
+    return { success: false, error: sbErr.message || 'Failed to enter giveaway. Please try again.' };
+  }
+
+  // Count real entries from DB after successful insert
+  let count = 0;
+  try {
+    const { count: entryCount } = await supabase
+      .from('giveaway_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('giveaway_id', giveawayId);
+    count = entryCount ?? 0;
   } catch {}
 
-  return { success: true, message: 'Entered giveaway successfully!', hasJoined: true };
+  return { success: true, message: 'Successfully entered the drop!', hasJoined: true, participantCount: count };
 }
 
 export const apiEnterGiveaway = apiJoinGiveaway;
@@ -564,13 +582,28 @@ export const apiEnterGiveaway = apiJoinGiveaway;
 export async function apiLeaveGiveaway(
   giveawayId: string
 ): Promise<{ success: boolean; message?: string; participantCount?: number; hasJoined?: boolean; error?: string }> {
+  const user = getStoredUser();
+  if (!user) return { success: false, error: 'Must be logged in.' };
+
+  // Use active auth session ID so RLS delete check passes
+  const { data: sessionData } = await supabase.auth.getSession();
+  const authUserId: string = sessionData?.session?.user?.id || user.id;
+
   try {
-    const user = getStoredUser();
-    if (user) {
-      await supabase.from('giveaway_entries').delete().eq('giveaway_id', giveawayId).eq('user_id', user.id);
-    }
+    await supabase.from('giveaway_entries').delete().eq('giveaway_id', giveawayId).eq('user_id', authUserId);
   } catch {}
-  return { success: true, message: 'Left giveaway.', hasJoined: false };
+
+  // Count real entries from DB after deletion
+  let count = 0;
+  try {
+    const { count: entryCount } = await supabase
+      .from('giveaway_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('giveaway_id', giveawayId);
+    count = entryCount ?? 0;
+  } catch {}
+
+  return { success: true, message: 'Left giveaway.', hasJoined: false, participantCount: count };
 }
 
 export async function apiRedeemGiveawayBoost(
