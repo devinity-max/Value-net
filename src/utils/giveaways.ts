@@ -64,18 +64,50 @@ export async function apiGetGiveaways(params?: {
         }
       }
 
+      // Batch resolve host profiles from profiles table to avoid schema column dependencies
+      const hostIds = Array.from(new Set(dbGiveaways.map((g: any) => g.host_id).filter(Boolean)));
+      const profileMap = new Map<string, { username: string; displayName: string; avatarUrl: string; role: string }>();
+
+      if (hostIds.length > 0) {
+        try {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username, display_name, avatar_url, role')
+            .in('id', hostIds);
+
+          if (profiles) {
+            profiles.forEach((p: any) => {
+              profileMap.set(p.id, {
+                username: p.username || 'host',
+                displayName: p.display_name || p.username || 'host',
+                avatarUrl: p.avatar_url || 'person',
+                role: p.role || 'APPROVED_CREATOR',
+              });
+            });
+          }
+        } catch (e) {
+          console.warn('[GIVEAWAYS] Failed to batch lookup host profiles:', e);
+        }
+      }
+
       list = dbGiveaways.map((gw: any) => {
         const userEntry = userEntriesMap.get(gw.id);
+        const hostProfile = profileMap.get(gw.host_id);
         const statusVal = (gw.status || 'ACTIVE').toUpperCase() as GiveawayStatus;
+
+        const resolvedHostName = gw.host_name || hostProfile?.username || 'host';
+        const resolvedHostDisplayName = gw.host_display_name || hostProfile?.displayName || resolvedHostName;
+        const resolvedHostAvatar = gw.host_avatar || hostProfile?.avatarUrl || 'person';
+        const resolvedHostRole = gw.host_role || hostProfile?.role || 'MEMBER';
 
         return {
           id: gw.id,
           hostId: gw.host_id,
-          hostName: gw.host_name,
-          hostDisplayName: gw.host_display_name || gw.host_name,
-          hostAvatar: gw.host_avatar || 'person',
-          hostTitle: gw.host_title || 'host',
-          hostRole: gw.host_role || 'MEMBER',
+          hostName: resolvedHostName,
+          hostDisplayName: resolvedHostDisplayName,
+          hostAvatar: resolvedHostAvatar,
+          hostTitle: gw.host_title || resolvedHostRole,
+          hostRole: resolvedHostRole as any,
           hostBadges: typeof gw.host_badges === 'string' ? JSON.parse(gw.host_badges) : (gw.host_badges || []),
           title: gw.title,
           description: gw.description || '',
@@ -186,16 +218,41 @@ export async function apiGetGiveaway(id: string): Promise<{
         }
       }
 
+      // Lookup host profile fallback
+      let hostProfile: { username: string; displayName: string; avatarUrl: string; role: string } | null = null;
+      if (gw.host_id) {
+        try {
+          const { data: p } = await supabase
+            .from('profiles')
+            .select('username, display_name, avatar_url, role')
+            .eq('id', gw.host_id)
+            .maybeSingle();
+          if (p) {
+            hostProfile = {
+              username: p.username || 'host',
+              displayName: p.display_name || p.username || 'host',
+              avatarUrl: p.avatar_url || 'person',
+              role: p.role || 'APPROVED_CREATOR',
+            };
+          }
+        } catch {}
+      }
+
+      const resolvedHostName = gw.host_name || hostProfile?.username || 'host';
+      const resolvedHostDisplayName = gw.host_display_name || hostProfile?.displayName || resolvedHostName;
+      const resolvedHostAvatar = gw.host_avatar || hostProfile?.avatarUrl || 'person';
+      const resolvedHostRole = gw.host_role || hostProfile?.role || 'MEMBER';
+
       return {
         success: true,
         giveaway: {
           id: gw.id,
           hostId: gw.host_id,
-          hostName: gw.host_name,
-          hostDisplayName: gw.host_display_name || gw.host_name,
-          hostAvatar: gw.host_avatar || 'person',
-          hostTitle: gw.host_title || 'host',
-          hostRole: gw.host_role || 'MEMBER',
+          hostName: resolvedHostName,
+          hostDisplayName: resolvedHostDisplayName,
+          hostAvatar: resolvedHostAvatar,
+          hostTitle: gw.host_title || resolvedHostRole,
+          hostRole: resolvedHostRole as any,
           hostBadges: typeof gw.host_badges === 'string' ? JSON.parse(gw.host_badges) : (gw.host_badges || []),
           title: gw.title,
           description: gw.description || '',
@@ -309,12 +366,10 @@ export async function apiCreateGiveaway(payload: {
     youtubeRedemptionCount: 0,
   };
 
-  // Attempt Supabase DB insert
+  // Core dbPayload — ONLY send guaranteed real columns to prevent schema cache PostgREST errors
   const dbPayload: Record<string, any> = {
     id,
     host_id: authenticatedId,
-    host_name: user.username || 'host',
-    host_display_name: user.displayName || user.username || 'host',
     title: payload.title,
     description: payload.description || '',
     prizes: JSON.stringify(payload.prizes || []),
@@ -326,10 +381,13 @@ export async function apiCreateGiveaway(payload: {
     max_participants: payload.maxParticipants || null,
     participant_count: 0,
     allow_leave: payload.allowLeave ?? true,
-    youtube_boost_enabled: !!payload.youtubeBoostEnabled,
-    youtube_video_id: payload.youtubeVideoId || null,
-    youtube_boost_percentage: payload.youtubeBoostPercentage || 10,
   };
+
+  if (payload.youtubeBoostEnabled) {
+    dbPayload.youtube_boost_enabled = true;
+    if (payload.youtubeVideoId) dbPayload.youtube_video_id = payload.youtubeVideoId;
+    if (payload.youtubeBoostPercentage) dbPayload.youtube_boost_percentage = payload.youtubeBoostPercentage;
+  }
 
   let { data: dbGw, error: sbErr } = await supabase
     .from('giveaways')
@@ -337,18 +395,27 @@ export async function apiCreateGiveaway(payload: {
     .select()
     .maybeSingle();
 
-  // Fallback retry if JSON column format or optional column caused issue
-  if (sbErr && (sbErr.message?.includes('youtube') || sbErr.message?.includes('json') || sbErr.message?.includes('schema'))) {
-    console.warn('[GIVEAWAYS] Retrying insert with array prizes:', sbErr.message);
-    const retryPayload = {
-      ...dbPayload,
-      prizes: payload.prizes || [],
-      rules: payload.rules || [],
-      eligibility: payload.eligibility || {},
+  // Retry fallback if optional columns caused schema cache error
+  if (sbErr && sbErr.message?.includes('schema cache')) {
+    console.warn('[GIVEAWAYS] Retrying insert with core payload:', sbErr.message);
+    const corePayload = {
+      id,
+      host_id: authenticatedId,
+      title: payload.title,
+      description: payload.description || '',
+      prizes: JSON.stringify(payload.prizes || []),
+      rules: JSON.stringify(payload.rules || []),
+      eligibility: JSON.stringify(payload.eligibility || {}),
+      status: (payload.status || 'ACTIVE').toUpperCase(),
+      starts_at: payload.startsAt ? new Date(payload.startsAt).toISOString() : new Date().toISOString(),
+      ends_at: payload.endsAt ? new Date(payload.endsAt).toISOString() : new Date(Date.now() + 86400000).toISOString(),
+      max_participants: payload.maxParticipants || null,
+      participant_count: 0,
+      allow_leave: payload.allowLeave ?? true,
     };
     const res2 = await supabase
       .from('giveaways')
-      .insert(retryPayload)
+      .insert(corePayload)
       .select()
       .maybeSingle();
     dbGw = res2.data;
