@@ -541,9 +541,23 @@ export async function apiJoinGiveaway(
 
   // Always use the active Supabase Auth session user ID so auth.uid() matches user_id for RLS
   const { data: sessionData } = await supabase.auth.getSession();
-  const authUserId: string = sessionData?.session?.user?.id || user.id;
+  let authUserId: string | null = sessionData?.session?.user?.id ?? null;
 
-  const entryId = `entry-${giveawayId}-${authUserId}`;
+  if (!authUserId || !isValidUUID(authUserId)) {
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData?.user?.id && isValidUUID(authData.user.id)) {
+      authUserId = authData.user.id;
+    } else if (user.id && isValidUUID(user.id)) {
+      authUserId = user.id;
+    }
+  }
+
+  if (!authUserId || !isValidUUID(authUserId)) {
+    return { success: false, error: 'Please sign in with a valid account to enter giveaways.' };
+  }
+
+  // Use a real 36-character UUID for the primary key (no "entry-" prefix)
+  const entryId = generateUUID();
 
   const { error: sbErr } = await supabase.from('giveaway_entries').insert({
     id: entryId,
@@ -582,9 +596,21 @@ export async function apiLeaveGiveaway(
   const user = getStoredUser();
   if (!user) return { success: false, error: 'Must be logged in.' };
 
-  // Use active auth session ID so RLS delete check passes
   const { data: sessionData } = await supabase.auth.getSession();
-  const authUserId: string = sessionData?.session?.user?.id || user.id;
+  let authUserId: string | null = sessionData?.session?.user?.id ?? null;
+
+  if (!authUserId || !isValidUUID(authUserId)) {
+    const { data: authData } = await supabase.auth.getUser();
+    if (authData?.user?.id && isValidUUID(authData.user.id)) {
+      authUserId = authData.user.id;
+    } else if (user.id && isValidUUID(user.id)) {
+      authUserId = user.id;
+    }
+  }
+
+  if (!authUserId || !isValidUUID(authUserId)) {
+    return { success: false, error: 'Must be signed in with a valid account.' };
+  }
 
   try {
     await supabase.from('giveaway_entries').delete().eq('giveaway_id', giveawayId).eq('user_id', authUserId);
