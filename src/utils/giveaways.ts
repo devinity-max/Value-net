@@ -21,6 +21,16 @@ function saveStoredLocalGiveaways(items: GiveawayItem[]): void {
 
 let localGiveawaysCache: GiveawayItem[] = getStoredLocalGiveaways();
 
+export function extractYoutubeVideoId(urlOrId?: string): string | undefined {
+  if (!urlOrId) return undefined;
+  if (/^[a-zA-Z0-9_-]{11}$/.test(urlOrId.trim())) {
+    return urlOrId.trim();
+  }
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = urlOrId.match(regExp);
+  return match && match[2].length === 11 ? match[2] : undefined;
+}
+
 export async function apiGetGiveaways(params?: {
   filter?: string;
   search?: string;
@@ -94,7 +104,7 @@ export async function apiGetGiveaways(params?: {
       const hostIds = Array.from(
         new Set(dbGiveaways.map((g: any) => g.host_id).filter(Boolean))
       );
-      const profileMap = new Map<
+      const hostProfileMap = new Map<
         string,
         { username: string; displayName: string; avatarUrl: string; role: string }
       >();
@@ -108,7 +118,7 @@ export async function apiGetGiveaways(params?: {
 
           if (profiles) {
             profiles.forEach((p: any) => {
-              profileMap.set(p.id, {
+              hostProfileMap.set(p.id, {
                 username: p.username || 'host',
                 displayName: p.display_name || p.username || 'host',
                 avatarUrl: p.avatar_url || 'person',
@@ -121,10 +131,41 @@ export async function apiGetGiveaways(params?: {
         }
       }
 
-      // 4. Construct normalized GiveawayItem view models
+      // 4. Batch resolve winner profiles from profiles table (winner_id foreign key)
+      const winnerIds = Array.from(
+        new Set(dbGiveaways.map((g: any) => g.winner_id).filter(Boolean))
+      );
+      const winnerProfileMap = new Map<
+        string,
+        { username: string; displayName: string; avatarUrl: string }
+      >();
+
+      if (winnerIds.length > 0) {
+        try {
+          const { data: winnerProfiles } = await supabase
+            .from('profiles')
+            .select('id, username, display_name, avatar_url')
+            .in('id', winnerIds);
+
+          if (winnerProfiles) {
+            winnerProfiles.forEach((p: any) => {
+              winnerProfileMap.set(p.id, {
+                username: p.username || 'winner',
+                displayName: p.display_name || p.username || 'winner',
+                avatarUrl: p.avatar_url || 'person',
+              });
+            });
+          }
+        } catch (e) {
+          console.warn('[GIVEAWAYS] Failed to batch lookup winner profiles:', e);
+        }
+      }
+
+      // 5. Construct normalized GiveawayItem view models
       list = dbGiveaways.map((gw: any) => {
         const userEntry = userEntriesMap.get(gw.id);
-        const hostProfile = profileMap.get(gw.host_id);
+        const hostProfile = hostProfileMap.get(gw.host_id);
+        const winnerProfile = gw.winner_id ? winnerProfileMap.get(gw.winner_id) : null;
         const statusVal = (gw.status || 'ACTIVE').toUpperCase() as GiveawayStatus;
 
         const resolvedHostName = hostProfile?.username || 'host';
@@ -132,6 +173,11 @@ export async function apiGetGiveaways(params?: {
         const resolvedHostAvatar = hostProfile?.avatarUrl || 'person';
         const resolvedHostRole = hostProfile?.role || 'APPROVED_CREATOR';
         const derivedParticipantCount = participantCountMap.get(gw.id) || 0;
+
+        const resolvedWinnerUsername = gw.winner_username || winnerProfile?.username;
+        const resolvedWinnerDisplayName =
+          gw.winner_display_name || winnerProfile?.displayName || resolvedWinnerUsername;
+        const resolvedWinnerAvatar = gw.winner_avatar || winnerProfile?.avatarUrl || 'person';
 
         return {
           id: gw.id,
@@ -157,9 +203,9 @@ export async function apiGetGiveaways(params?: {
           createdAt: gw.created_at ? new Date(gw.created_at).getTime() : Date.now(),
           updatedAt: gw.updated_at ? new Date(gw.updated_at).getTime() : Date.now(),
           winnerId: gw.winner_id,
-          winnerUsername: gw.winner_username,
-          winnerDisplayName: gw.winner_display_name,
-          winnerAvatar: gw.winner_avatar,
+          winnerUsername: resolvedWinnerUsername,
+          winnerDisplayName: resolvedWinnerDisplayName,
+          winnerAvatar: resolvedWinnerAvatar,
           completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
           hasJoined: !!userEntry,
           hasUserBoosted: userEntry?.isBoosted ?? false,
@@ -271,7 +317,7 @@ export async function apiGetGiveaway(id: string): Promise<{
         }
       } catch {}
 
-      // Lookup host profile fallback
+      // Lookup host profile
       let hostProfile: { username: string; displayName: string; avatarUrl: string; role: string } | null = null;
       if (gw.host_id) {
         try {
@@ -291,10 +337,34 @@ export async function apiGetGiveaway(id: string): Promise<{
         } catch {}
       }
 
+      // Lookup winner profile
+      let winnerProfile: { username: string; displayName: string; avatarUrl: string } | null = null;
+      if (gw.winner_id) {
+        try {
+          const { data: wp } = await supabase
+            .from('profiles')
+            .select('username, display_name, avatar_url')
+            .eq('id', gw.winner_id)
+            .maybeSingle();
+          if (wp) {
+            winnerProfile = {
+              username: wp.username || 'winner',
+              displayName: wp.display_name || wp.username || 'winner',
+              avatarUrl: wp.avatar_url || 'person',
+            };
+          }
+        } catch {}
+      }
+
       const resolvedHostName = hostProfile?.username || 'host';
       const resolvedHostDisplayName = hostProfile?.displayName || resolvedHostName;
       const resolvedHostAvatar = hostProfile?.avatarUrl || 'person';
       const resolvedHostRole = hostProfile?.role || 'APPROVED_CREATOR';
+
+      const resolvedWinnerUsername = gw.winner_username || winnerProfile?.username;
+      const resolvedWinnerDisplayName =
+        gw.winner_display_name || winnerProfile?.displayName || resolvedWinnerUsername;
+      const resolvedWinnerAvatar = gw.winner_avatar || winnerProfile?.avatarUrl || 'person';
 
       return {
         success: true,
@@ -322,9 +392,9 @@ export async function apiGetGiveaway(id: string): Promise<{
           createdAt: gw.created_at ? new Date(gw.created_at).getTime() : Date.now(),
           updatedAt: gw.updated_at ? new Date(gw.updated_at).getTime() : Date.now(),
           winnerId: gw.winner_id,
-          winnerUsername: gw.winner_username,
-          winnerDisplayName: gw.winner_display_name,
-          winnerAvatar: gw.winner_avatar,
+          winnerUsername: resolvedWinnerUsername,
+          winnerDisplayName: resolvedWinnerDisplayName,
+          winnerAvatar: resolvedWinnerAvatar,
           completedAt: gw.completed_at ? new Date(gw.completed_at).getTime() : undefined,
           hasJoined,
           hasUserBoosted,
@@ -370,7 +440,6 @@ export async function apiCreateGiveaway(payload: {
     };
   }
 
-  // Derive host_id strictly from active Supabase Auth session so auth.uid() matches host_id
   const { data: sessionData } = await supabase.auth.getSession();
   let authenticatedId: string | null = sessionData?.session?.user?.id ?? null;
 
@@ -391,8 +460,8 @@ export async function apiCreateGiveaway(payload: {
   }
 
   const id = generateUUID();
+  const videoId = extractYoutubeVideoId(payload.youtubeUrl) || payload.youtubeVideoId;
 
-  // ONLY send guaranteed real columns to Supabase database table
   const dbPayload: Record<string, any> = {
     id,
     host_id: authenticatedId,
@@ -412,7 +481,7 @@ export async function apiCreateGiveaway(payload: {
 
   if (payload.youtubeBoostEnabled) {
     dbPayload.youtube_boost_enabled = true;
-    if (payload.youtubeVideoId) dbPayload.youtube_video_id = payload.youtubeVideoId;
+    if (videoId) dbPayload.youtube_video_id = videoId;
     if (payload.youtubeBoostPercentage)
       dbPayload.youtube_boost_percentage = payload.youtubeBoostPercentage;
   }
@@ -454,12 +523,11 @@ export async function apiCreateGiveaway(payload: {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     youtubeBoostEnabled: !!payload.youtubeBoostEnabled,
-    youtubeVideoId: payload.youtubeVideoId,
+    youtubeVideoId: videoId,
     youtubeBoostPercentage: payload.youtubeBoostPercentage || 10,
     youtubeRedemptionCount: 0,
   };
 
-  // Update local cache ONLY after DB insert succeeds
   localGiveawaysCache = [createdItem, ...localGiveawaysCache];
   saveStoredLocalGiveaways(localGiveawaysCache);
 
@@ -534,12 +602,12 @@ export async function apiUpdateGiveaway(
 }
 
 export async function apiJoinGiveaway(
-  giveawayId: string
+  giveawayId: string,
+  secretCode?: string
 ): Promise<{ success: boolean; message?: string; participantCount?: number; hasJoined?: boolean; error?: string }> {
   const user = getStoredUser();
   if (!user) return { success: false, error: 'Must be logged in to enter giveaways.' };
 
-  // Always use the active Supabase Auth session user ID so auth.uid() matches user_id for RLS
   const { data: sessionData } = await supabase.auth.getSession();
   let authUserId: string | null = sessionData?.session?.user?.id ?? null;
 
@@ -556,20 +624,61 @@ export async function apiJoinGiveaway(
     return { success: false, error: 'Please sign in with a valid account to enter giveaways.' };
   }
 
-  // Use a real 36-character UUID for the primary key (no "entry-" prefix)
+  if (!giveawayId || !isValidUUID(giveawayId)) {
+    return { success: false, error: 'Invalid giveaway identifier.' };
+  }
+
+  // Fetch giveaway to check status & secret code
+  const gwRes = await apiGetGiveaway(giveawayId);
+  if (!gwRes.success || !gwRes.giveaway) {
+    return { success: false, error: 'Giveaway drop not found.' };
+  }
+
+  const gw = gwRes.giveaway;
+  if (gw.status === 'ENDED' || gw.status === 'COMPLETED' || gw.status === 'CANCELLED') {
+    return { success: false, error: 'This drop has already concluded.' };
+  }
+
+  let isBoosted = false;
+
+  // Validate Secret Code if YouTube Boost is enabled for this Drop
+  if (gw.youtubeBoostEnabled) {
+    if (!secretCode || !secretCode.trim()) {
+      return { success: false, error: 'Please enter the secret code found in the video.' };
+    }
+
+    const redeemRes = await apiRedeemGiveawayBoost(giveawayId, secretCode.trim());
+    if (!redeemRes.success) {
+      return { success: false, error: redeemRes.error || 'Incorrect drop code. Watch the video and try again.' };
+    }
+    isBoosted = true;
+  }
+
+  // Check if entry already exists
+  const { data: existingEntry } = await supabase
+    .from('giveaway_entries')
+    .select('id')
+    .eq('giveaway_id', giveawayId)
+    .eq('user_id', authUserId)
+    .maybeSingle();
+
+  if (existingEntry) {
+    return { success: true, message: 'You are already entered in this drop!', hasJoined: true };
+  }
+
   const entryId = generateUUID();
 
   const { error: sbErr } = await supabase.from('giveaway_entries').insert({
     id: entryId,
     giveaway_id: giveawayId,
     user_id: authUserId,
+    is_boosted: isBoosted,
     joined_at: new Date().toISOString(),
   });
 
   if (sbErr) {
-    // Duplicate entry (unique violation) means user already entered
     if (sbErr.code === '23505' || sbErr.message?.includes('duplicate') || sbErr.message?.includes('unique')) {
-      return { success: false, hasJoined: true, error: 'You have already entered this giveaway.' };
+      return { success: true, message: 'You are already entered in this drop!', hasJoined: true };
     }
     console.error('[GIVEAWAYS] Failed to insert entry:', sbErr.message, sbErr.code);
     return { success: false, error: sbErr.message || 'Failed to enter giveaway. Please try again.' };
@@ -585,7 +694,7 @@ export async function apiJoinGiveaway(
     count = entryCount ?? 0;
   } catch {}
 
-  return { success: true, message: 'Successfully entered the drop!', hasJoined: true, participantCount: count };
+  return { success: true, message: "🎉 You're in! Your entry has been recorded.", hasJoined: true, participantCount: count };
 }
 
 export const apiEnterGiveaway = apiJoinGiveaway;
@@ -616,7 +725,6 @@ export async function apiLeaveGiveaway(
     await supabase.from('giveaway_entries').delete().eq('giveaway_id', giveawayId).eq('user_id', authUserId);
   } catch {}
 
-  // Count real entries from DB after deletion
   let count = 0;
   try {
     const { count: entryCount } = await supabase
@@ -667,94 +775,210 @@ export const apiVerifyGiveawayCode = apiRedeemGiveawayBoost;
 export async function apiDrawGiveawayWinner(
   giveawayId: string
 ): Promise<{ success: boolean; message?: string; winner?: any; giveaway?: GiveawayItem; error?: string }> {
-  localGiveawaysCache = localGiveawaysCache.map((g) =>
-    g.id === giveawayId ? { ...g, status: 'COMPLETED' as GiveawayStatus } : g
-  );
-  saveStoredLocalGiveaways(localGiveawaysCache);
+  // 1. Check if a winner has already been drawn to prevent rerolling
+  const currentRes = await apiGetGiveaway(giveawayId);
+  if (currentRes.giveaway?.winnerId) {
+    return {
+      success: true,
+      message: `Winner already drawn: @${currentRes.giveaway.winnerUsername || 'winner'}`,
+      winner: {
+        user_id: currentRes.giveaway.winnerId,
+        username: currentRes.giveaway.winnerUsername,
+        display_name: currentRes.giveaway.winnerDisplayName,
+        avatar_url: currentRes.giveaway.winnerAvatar,
+      },
+      giveaway: currentRes.giveaway,
+    };
+  }
 
   try {
+    // 2. Fetch real entries for this specific giveaway
     const { data: entries } = await supabase
       .from('giveaway_entries')
       .select('*')
       .eq('giveaway_id', giveawayId);
 
-    if (entries && entries.length > 0) {
-      const winner = entries[Math.floor(Math.random() * entries.length)];
-      let winnerProfile: { username: string; displayName: string; avatarUrl: string } | null = null;
-      if (winner.user_id) {
-        try {
-          const { data: p } = await supabase
-            .from('profiles')
-            .select('username, display_name, avatar_url')
-            .eq('id', winner.user_id)
-            .maybeSingle();
-          if (p) {
-            winnerProfile = {
-              username: p.username || 'member',
-              displayName: p.display_name || p.username || 'member',
-              avatarUrl: p.avatar_url || 'person',
-            };
-          }
-        } catch {}
-      }
-
-      const resolvedWinnerUsername = winnerProfile?.username || 'member';
-      const resolvedWinnerDisplayName = winnerProfile?.displayName || resolvedWinnerUsername;
-      const resolvedWinnerAvatar = winnerProfile?.avatarUrl || 'person';
-
-      await supabase
-        .from('giveaways')
-        .update({
-          winner_id: winner.user_id,
-          winner_username: resolvedWinnerUsername,
-          winner_display_name: resolvedWinnerDisplayName,
-          winner_avatar: resolvedWinnerAvatar,
-          status: 'COMPLETED',
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', giveawayId);
-
-      const gwRes = await apiGetGiveaway(giveawayId);
-      return {
-        success: true,
-        message: `Winner drawn: @${resolvedWinnerUsername}!`,
-        winner: {
-          ...winner,
-          username: resolvedWinnerUsername,
-          display_name: resolvedWinnerDisplayName,
-          avatar_url: resolvedWinnerAvatar,
-        },
-        giveaway: gwRes.giveaway,
-      };
+    if (!entries || entries.length === 0) {
+      return { success: false, error: 'No eligible entrants yet.' };
     }
-  } catch {}
 
-  await apiUpdateGiveaway(giveawayId, { status: 'COMPLETED' });
-  const gwRes = await apiGetGiveaway(giveawayId);
-  return {
-    success: true,
-    message: 'Giveaway concluded!',
-    giveaway: gwRes.giveaway,
-  };
+    // 3. Perform weighted RNG selection (boosted entries receive higher weight)
+    const totalWeight = entries.reduce((sum, e) => sum + (e.weight || (e.is_boosted ? 1.1 : 1.0)), 0);
+    let randomNum = Math.random() * totalWeight;
+    let selectedWinner = entries[0];
+
+    for (const entry of entries) {
+      const entryWeight = entry.weight || (entry.is_boosted ? 1.1 : 1.0);
+      if (randomNum <= entryWeight) {
+        selectedWinner = entry;
+        break;
+      }
+      randomNum -= entryWeight;
+    }
+
+    // 4. Resolve winner profile from profiles table
+    let winnerProfile: { username: string; displayName: string; avatarUrl: string } | null = null;
+    if (selectedWinner.user_id) {
+      try {
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('username, display_name, avatar_url')
+          .eq('id', selectedWinner.user_id)
+          .maybeSingle();
+        if (p) {
+          winnerProfile = {
+            username: p.username || 'member',
+            displayName: p.display_name || p.username || 'member',
+            avatarUrl: p.avatar_url || 'person',
+          };
+        }
+      } catch {}
+    }
+
+    const resolvedWinnerUsername = winnerProfile?.username || 'member';
+    const resolvedWinnerDisplayName = winnerProfile?.displayName || resolvedWinnerUsername;
+    const resolvedWinnerAvatar = winnerProfile?.avatarUrl || 'person';
+
+    // 5. Persist winner permanently in database
+    await supabase
+      .from('giveaways')
+      .update({
+        winner_id: selectedWinner.user_id,
+        winner_username: resolvedWinnerUsername,
+        winner_display_name: resolvedWinnerDisplayName,
+        winner_avatar: resolvedWinnerAvatar,
+        status: 'COMPLETED',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', giveawayId);
+
+    localGiveawaysCache = localGiveawaysCache.map((g) =>
+      g.id === giveawayId
+        ? {
+            ...g,
+            status: 'COMPLETED' as GiveawayStatus,
+            winnerId: selectedWinner.user_id,
+            winnerUsername: resolvedWinnerUsername,
+            winnerDisplayName: resolvedWinnerDisplayName,
+            winnerAvatar: resolvedWinnerAvatar,
+          }
+        : g
+    );
+    saveStoredLocalGiveaways(localGiveawaysCache);
+
+    const gwRes = await apiGetGiveaway(giveawayId);
+    return {
+      success: true,
+      message: `🏆 Winner drawn: @${resolvedWinnerUsername}!`,
+      winner: {
+        user_id: selectedWinner.user_id,
+        username: resolvedWinnerUsername,
+        display_name: resolvedWinnerDisplayName,
+        avatar_url: resolvedWinnerAvatar,
+      },
+      giveaway: gwRes.giveaway,
+    };
+  } catch (err: any) {
+    console.error('[GIVEAWAYS] apiDrawGiveawayWinner error:', err);
+    return { success: false, error: err?.message || 'Failed to draw winner.' };
+  }
 }
 
 export async function apiEndGiveaway(
   giveawayId: string
 ): Promise<{ success: boolean; message?: string; giveaway?: GiveawayItem; error?: string }> {
-  return apiDrawGiveawayWinner(giveawayId);
-}
-
-export async function apiCancelGiveaway(
-  giveawayId: string
-): Promise<{ success: boolean; message?: string; giveaway?: GiveawayItem; error?: string }> {
   localGiveawaysCache = localGiveawaysCache.map((g) =>
-    g.id === giveawayId ? { ...g, status: 'CANCELLED' as GiveawayStatus } : g
+    g.id === giveawayId ? { ...g, status: 'ENDED' as GiveawayStatus } : g
   );
   saveStoredLocalGiveaways(localGiveawaysCache);
 
-  await apiUpdateGiveaway(giveawayId, { status: 'CANCELLED' });
+  try {
+    const { data: dbGw, error: sbErr } = await supabase
+      .from('giveaways')
+      .update({
+        status: 'ENDED',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', giveawayId)
+      .select()
+      .maybeSingle();
+
+    if (!sbErr && dbGw) {
+      const gwRes = await apiGetGiveaway(giveawayId);
+      return { success: true, message: 'Drop concluded.', giveaway: gwRes.giveaway };
+    }
+  } catch {}
+
   const gwRes = await apiGetGiveaway(giveawayId);
-  return { success: true, message: 'Giveaway cancelled.', giveaway: gwRes.giveaway };
+  return { success: true, message: 'Drop concluded.', giveaway: gwRes.giveaway };
+}
+
+export const apiCancelGiveaway = apiEndGiveaway;
+
+export async function apiContactGiveawayWinner(
+  giveawayId: string
+): Promise<{ success: boolean; session?: any; message?: string; error?: string }> {
+  const user = getStoredUser();
+  if (!user) return { success: false, error: 'Must be logged in to contact winner.' };
+
+  const gwRes = await apiGetGiveaway(giveawayId);
+  if (!gwRes.success || !gwRes.giveaway) {
+    return { success: false, error: 'Giveaway drop not found.' };
+  }
+
+  const gw = gwRes.giveaway;
+  if (!gw.winnerId) {
+    return { success: false, error: 'No winner has been drawn for this drop yet.' };
+  }
+
+  // Authorization: Only host, admin, or winner can access winner contact channel
+  const isHost = user.id === gw.hostId;
+  const isWinner = user.id === gw.winnerId;
+  const isAdmin = user.role === 'ROOT_OWNER' || user.role === 'ADMIN' || user.role === 'MODERATOR';
+
+  if (!isHost && !isWinner && !isAdmin) {
+    return { success: false, error: 'Unauthorized: Only the drop host and the winner can access this contact channel.' };
+  }
+
+  try {
+    // 1. Check for existing session in trade_sessions
+    const { data: existingSession } = await supabase
+      .from('trade_sessions')
+      .select('*')
+      .eq('trade_ad_id', giveawayId)
+      .in('status', ['IN_PROGRESS', 'OPEN', 'PENDING', 'ACTIVE'])
+      .maybeSingle();
+
+    if (existingSession) {
+      return { success: true, session: existingSession, message: 'Winner contact session opened!' };
+    }
+
+    // 2. Create a new trade_sessions row for host ↔ winner contact
+    const sessionPayload = {
+      trade_ad_id: giveawayId,
+      creator_id: gw.hostId,
+      creator_name: gw.hostName || 'host',
+      creator_avatar: gw.hostAvatar || 'person',
+      participant_id: gw.winnerId,
+      participant_name: gw.winnerUsername || 'winner',
+      participant_avatar: gw.winnerAvatar || 'person',
+      status: 'IN_PROGRESS',
+    };
+
+    const { data: newSession, error: createErr } = await supabase
+      .from('trade_sessions')
+      .insert(sessionPayload)
+      .select()
+      .maybeSingle();
+
+    if (!createErr && newSession) {
+      return { success: true, session: newSession, message: 'Winner contact chat established!' };
+    }
+  } catch (err: any) {
+    console.warn('[GIVEAWAYS] Contact winner session error:', err);
+  }
+
+  return { success: false, error: 'Failed to establish winner contact session.' };
 }
 
 export async function apiGetGiveawayParticipants(

@@ -6,6 +6,8 @@ import {
   apiLeaveGiveaway,
   apiRedeemGiveawayBoost,
   apiDrawGiveawayWinner,
+  apiEndGiveaway,
+  apiContactGiveawayWinner,
 } from '../utils/giveaways';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
@@ -14,6 +16,7 @@ import { supabase } from '../lib/supabaseClient';
 import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
 import { ParticipantsModal } from './ParticipantsModal';
+import { DropEntryModal } from './DropEntryModal';
 
 interface GiveawaysViewProps {
   currentUser: AuthUser | null;
@@ -36,19 +39,12 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
-  // Secret code verification input state per giveaway ID
-  const [secretCodes, setSecretCodes] = useState<Record<string, string>>({});
-  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  // Drop entry modal state
+  const [entryModalGw, setEntryModalGw] = useState<GiveawayItem | null>(null);
 
-  // Participants modal
+  // Participants modal state
   const [selectedGwForModal, setSelectedGwForModal] = useState<GiveawayItem | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
-
-  const isAuthorizedToHost =
-    currentUser &&
-    (currentUser.role === 'ROOT_OWNER' ||
-      currentUser.role === 'ADMIN' ||
-      currentUser.role === 'APPROVED_CREATOR');
 
   const loadGiveaways = async () => {
     setLoading(true);
@@ -93,22 +89,24 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
     };
   }, [filter, search, currentUser?.id]);
 
-  // Join or Leave Giveaway
+  // Handle Drop Entry or Leave
   const handleToggleJoin = async (gw: GiveawayItem) => {
     if (!currentUser) {
       onOpenAuth();
       return;
     }
 
-    setActionInProgress(gw.id);
     const isJoined = gw.hasJoined ?? false;
 
     if (isJoined) {
+      // Leave drop
+      setActionInProgress(gw.id);
       const res = await apiLeaveGiveaway(gw.id);
+      setActionInProgress(null);
+
       if (res.success) {
         playClickSound();
         onShowToast('Left giveaway entry pool.', 'info');
-        // Immediately reflect the DB-backed count while full refetch happens in background
         if (res.participantCount !== undefined) {
           setGiveaways((prev) =>
             prev.map((g) =>
@@ -123,61 +121,39 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
         onShowToast(res.error || 'Failed to leave giveaway.', 'error');
       }
     } else {
-      const res = await apiJoinGiveaway(gw.id);
-      if (res.success) {
-        playSuccessSound();
-        onShowToast(res.message || 'Successfully entered giveaway! Good luck!', 'success');
-        // Immediately reflect the DB-backed count while full refetch happens in background
-        if (res.participantCount !== undefined) {
-          setGiveaways((prev) =>
-            prev.map((g) =>
-              g.id === gw.id
-                ? { ...g, hasJoined: true, participantCount: res.participantCount! }
-                : g
-            )
-          );
-        }
-        loadGiveaways();
-      } else {
-        onShowToast(res.error || 'Failed to enter giveaway.', 'error');
-      }
+      // Open entry modal (watch video + secret code submission)
+      setEntryModalGw(gw);
     }
-    setActionInProgress(null);
   };
 
-  // Redeem Secret Code for YouTube Boost
-  const handleVerifySecretCode = async (gw: GiveawayItem) => {
-    if (!currentUser) {
-      onOpenAuth();
-      return;
-    }
-
-    const code = (secretCodes[gw.id] || '').trim();
-    if (!code) {
-      onShowToast('Please enter the secret code found in the video.', 'error');
-      return;
-    }
-
-    setVerifyingId(gw.id);
-    const res = await apiRedeemGiveawayBoost(gw.id, code);
-    setVerifyingId(null);
-
+  // Submit Drop Entry from Modal
+  const handleConfirmSubmitEntry = async (giveawayId: string, secretCode?: string) => {
+    const res = await apiJoinGiveaway(giveawayId, secretCode);
     if (res.success) {
-      playSuccessSound();
-      onShowToast(
-        res.message || `✓ Secret code verified! +${res.boostPercentage || 10}% Boost Active!`,
-        'success'
-      );
-      // Clear input
-      setSecretCodes((prev) => ({ ...prev, [gw.id]: '' }));
+      onShowToast(res.message || "🎉 You're in! Good luck!", 'success');
+      if (res.participantCount !== undefined) {
+        setGiveaways((prev) =>
+          prev.map((g) =>
+            g.id === giveawayId
+              ? { ...g, hasJoined: true, participantCount: res.participantCount! }
+              : g
+          )
+        );
+      }
       loadGiveaways();
+      return { success: true };
     } else {
-      onShowToast(res.error || 'Invalid secret code. Please check video and try again.', 'error');
+      return { success: false, error: res.error || 'Failed to enter drop.' };
     }
   };
 
   // Draw Winner (for Hosts / Admins)
   const handleDrawWinner = async (gw: GiveawayItem) => {
+    if (gw.winnerId || gw.winnerUsername) {
+      onShowToast(`Winner already drawn: @${gw.winnerUsername}!`, 'info');
+      return;
+    }
+
     if (!window.confirm(`Draw winner for "${gw.title}" now using provably fair RNG?`)) {
       return;
     }
@@ -187,13 +163,53 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
     if (res.success && res.winner) {
       playCoinSound();
-      onShowToast(
-        `🏆 Winner drawn: @${res.winner.username}${res.winner.hasYoutubeBoost ? ' (with YouTube Boost!)' : ''}`,
-        'success'
-      );
+      onShowToast(`🏆 Winner drawn: @${res.winner.username || res.winner.display_name}!`, 'success');
       loadGiveaways();
     } else {
       onShowToast(res.error || 'Failed to draw winner.', 'error');
+    }
+  };
+
+  // End Drop Early (renamed from Cancel)
+  const handleEndDrop = async (gw: GiveawayItem) => {
+    if (
+      !window.confirm(
+        `End drop "${gw.title}"? Status will become ENDED, but the winner and records will remain preserved.`
+      )
+    ) {
+      return;
+    }
+    setActionInProgress(gw.id);
+    const res = await apiEndGiveaway(gw.id);
+    setActionInProgress(null);
+
+    if (res.success) {
+      playClickSound();
+      onShowToast('Drop concluded.', 'info');
+      loadGiveaways();
+    } else {
+      onShowToast(res.error || 'Failed to end drop.', 'error');
+    }
+  };
+
+  // Contact Drop Winner (Host <-> Winner Chat)
+  const handleContactWinner = async (gw: GiveawayItem) => {
+    if (!currentUser) {
+      onOpenAuth();
+      return;
+    }
+    setActionInProgress(gw.id);
+    const res = await apiContactGiveawayWinner(gw.id);
+    setActionInProgress(null);
+
+    if (res.success) {
+      playSuccessSound();
+      onShowToast(res.message || 'Winner chat session established!', 'success');
+      if (onNavigateToTab) {
+        onNavigateToTab('live-trades');
+      }
+    } else {
+      onShowToast(res.error || 'Failed to contact winner.', 'error');
     }
   };
 
@@ -310,14 +326,19 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {giveaways.map((gw) => {
             const isJoined = gw.hasJoined ?? false;
-            const isBoosted = gw.hasUserBoosted ?? false;
             const isEnded =
               gw.status === 'ENDED' || gw.status === 'CANCELLED' || gw.status === 'COMPLETED';
+            const isDrawn = !!gw.winnerId || !!gw.winnerUsername || gw.status === 'COMPLETED';
+
+            const isHost = currentUser && currentUser.id === gw.hostId;
+            const isWinner = currentUser && gw.winnerId && currentUser.id === gw.winnerId;
             const isHostOrAdmin =
               currentUser &&
-              (currentUser.id === gw.hostId ||
+              (isHost ||
                 currentUser.role === 'ROOT_OWNER' ||
-                currentUser.role === 'ADMIN');
+                currentUser.role === 'ADMIN' ||
+                currentUser.role === 'MODERATOR');
+
             const prizeTotal = (gw.prizes || []).reduce(
               (sum, p) => sum + (p?.marketValue || p?.value || 0) * (p?.quantity || 1),
               0
@@ -333,7 +354,7 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <button
                       type="button"
-                      onClick={() => onViewTraderProfile(gw.hostUsername || gw.hostName)}
+                      onClick={() => onViewTraderProfile(gw.hostName)}
                       className="flex items-center gap-2 hover:opacity-80 text-left"
                     >
                       <div className="w-8 h-8 rounded-xl bg-purple-950/80 border border-purple-500/30 flex items-center justify-center text-purple-300">
@@ -343,7 +364,7 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                       </div>
                       <div>
                         <div className="font-game font-bold text-xs text-white leading-tight">
-                          @{gw.hostUsername || gw.hostName}
+                          @{gw.hostName}
                         </div>
                         <div className="text-[9px] font-mono text-purple-400 uppercase">
                           {gw.hostRole || 'Host'}
@@ -361,16 +382,14 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
                       <span
                         className={`text-[9px] font-game font-bold uppercase px-2.5 py-0.5 rounded-full border ${
-                          isEnded
+                          isDrawn
+                            ? 'bg-amber-950/80 border-amber-500/50 text-amber-300'
+                            : isEnded
                             ? 'bg-slate-900 border-slate-700 text-slate-400'
                             : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 animate-pulse'
                         }`}
                       >
-                        {gw.status === 'COMPLETED'
-                          ? 'CONCLUDED'
-                          : gw.status === 'ENDED'
-                          ? 'ENDED'
-                          : 'LIVE'}
+                        {isDrawn ? 'DRAWN' : isEnded ? 'ENDED' : 'LIVE'}
                       </span>
                     </div>
                   </div>
@@ -406,7 +425,7 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                     </div>
                   </div>
 
-                  {/* YouTube Video Attachment Banner (if configured) */}
+                  {/* YouTube Video Attachment Banner */}
                   {gw.youtubeBoostEnabled && gw.youtubeVideoId && (
                     <div className="p-2.5 rounded-2xl bg-[#080b18] border border-rose-500/30 mb-3 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -416,7 +435,7 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                             Creator Video Attached
                           </div>
                           <div className="text-[9px] font-mono text-slate-400">
-                            Find secret code in video for +{gw.youtubeBoostPercentage || 10}% boost!
+                            Watch video to find secret drop code!
                           </div>
                         </div>
                       </div>
@@ -431,73 +450,25 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                     </div>
                   )}
 
-                  {/* SECRET CODE VERIFICATION SECTION */}
-                  {gw.youtubeBoostEnabled && !isEnded && (
-                    <div className="p-3 rounded-2xl bg-purple-950/30 border border-purple-500/30 mb-3 space-y-2">
-                      {isBoosted ? (
-                        <div className="flex items-center justify-between text-xs font-mono text-purple-300">
-                          <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                            <span className="material-symbols-outlined text-sm">verified</span>
-                            <span>Code Verified (+{gw.youtubeBoostPercentage || 10}% Boost Active)</span>
-                          </div>
-                          {gw.userWinProbability !== undefined && (
-                            <span className="text-white font-bold">{gw.userWinProbability}% Chance</span>
-                          )}
+                  {/* Winner Announcement Banner (Permanently Displayed After Draw) */}
+                  {(gw.winnerUsername || gw.winnerId) && (
+                    <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/90 via-amber-950/80 to-purple-950/90 border border-amber-500/50 mb-3 shadow-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                          <span className="material-symbols-outlined text-base">emoji_events</span>
                         </div>
-                      ) : isJoined ? (
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-[10px] font-mono text-purple-300 uppercase">
-                            <span className="flex items-center gap-1">
-                              <span className="material-symbols-outlined text-xs">key</span>
-                              <span>Redeem Secret Video Code</span>
-                            </span>
-                            <span className="text-amber-400 font-bold">+{gw.youtubeBoostPercentage || 10}% Boost</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              value={secretCodes[gw.id] || ''}
-                              onChange={(e) =>
-                                setSecretCodes({ ...secretCodes, [gw.id]: e.target.value })
-                              }
-                              placeholder="Enter secret code..."
-                              className="flex-1 px-3 py-1.5 bg-[#070913] border border-purple-500/30 rounded-xl text-xs text-white placeholder-slate-500 focus:border-purple-500 focus:outline-none font-mono"
-                            />
-                            <button
-                              type="button"
-                              disabled={verifyingId === gw.id}
-                              onClick={() => handleVerifySecretCode(gw)}
-                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-game font-bold text-xs uppercase shadow-sm active:scale-95 disabled:opacity-50"
-                            >
-                              {verifyingId === gw.id ? 'Checking...' : 'Verify'}
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-[11px] font-sans text-slate-400 flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-xs text-amber-400">info</span>
-                          <span>Enter drop to redeem secret code for +{gw.youtubeBoostPercentage || 10}% winning weight!</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Winner Announcement Banner */}
-                  {gw.winnerUsername && (
-                    <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/80 to-amber-950/80 border border-amber-500/40 mb-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-amber-400 text-lg">emoji_events</span>
                         <div>
-                          <div className="text-xs font-game font-bold text-amber-300">
-                            Winner: @{gw.winnerUsername}
+                          <div className="text-[10px] font-game font-bold text-amber-400 uppercase tracking-wider">
+                            🏆 WINNER SELECTED
                           </div>
-                          <div className="text-[9px] font-mono text-slate-400">
-                            Selected via Provably Fair RNG
+                          <div className="text-xs font-game font-bold text-white">
+                            @{gw.winnerUsername || 'winner'}
                           </div>
                         </div>
                       </div>
                       <button
-                        onClick={() => onViewTraderProfile(gw.winnerUsername!)}
+                        type="button"
+                        onClick={() => onViewTraderProfile(gw.winnerUsername || 'winner')}
                         className="text-[11px] font-mono font-bold text-amber-400 hover:underline"
                       >
                         Profile &rarr;
@@ -523,19 +494,44 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
                   <div className="flex items-center gap-2">
                     {/* Host Action: Draw Winner */}
-                    {isHostOrAdmin && !isEnded && (
+                    {isHostOrAdmin && !isDrawn && !isEnded && (
                       <button
                         type="button"
                         disabled={actionInProgress === gw.id}
                         onClick={() => handleDrawWinner(gw)}
-                        className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-game font-bold uppercase transition-all"
+                        className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-game font-bold uppercase transition-all shadow-sm"
                       >
                         Draw
                       </button>
                     )}
 
+                    {/* Host/Winner Action: Contact Winner */}
+                    {isDrawn && (isHost || isWinner || isHostOrAdmin) && (
+                      <button
+                        type="button"
+                        disabled={actionInProgress === gw.id}
+                        onClick={() => handleContactWinner(gw)}
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-game font-black text-[11px] uppercase tracking-wider shadow-md flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-xs">chat</span>
+                        <span>Contact Winner</span>
+                      </button>
+                    )}
+
+                    {/* Host Action: End Drop (Replaces old Cancel) */}
+                    {isHostOrAdmin && !isEnded && (
+                      <button
+                        type="button"
+                        disabled={actionInProgress === gw.id}
+                        onClick={() => handleEndDrop(gw)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-game font-bold uppercase transition-all"
+                      >
+                        End Drop
+                      </button>
+                    )}
+
                     {/* Participant Action: Join / Leave */}
-                    {!isEnded ? (
+                    {!isEnded && !isDrawn ? (
                       <button
                         type="button"
                         disabled={actionInProgress === gw.id}
@@ -546,12 +542,14 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                             : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-purple-600/30 border border-purple-400/40'
                         }`}
                       >
-                        {isJoined ? 'Leave' : 'Enter Drop'}
+                        {isJoined ? '✓ Entered' : 'Enter Drop'}
                       </button>
                     ) : (
-                      <span className="text-[11px] font-game text-slate-500 uppercase font-bold">
-                        Concluded
-                      </span>
+                      isEnded && (
+                        <span className="text-[11px] font-game text-slate-500 uppercase font-bold px-2 py-1 bg-slate-900/80 rounded-lg border border-slate-800">
+                          Ended
+                        </span>
+                      )
                     )}
                   </div>
                 </div>
@@ -559,6 +557,16 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
             );
           })}
         </div>
+      )}
+
+      {/* Drop Entry Modal (YouTube Video + Secret Code Submission) */}
+      {entryModalGw && (
+        <DropEntryModal
+          giveaway={entryModalGw}
+          isOpen={!!entryModalGw}
+          onClose={() => setEntryModalGw(null)}
+          onSubmitEntry={handleConfirmSubmitEntry}
+        />
       )}
 
       {/* Entrants / Provable Weights Modal */}

@@ -6,7 +6,7 @@ import {
   apiGetGiveaways,
   apiDrawGiveawayWinner,
   apiEndGiveaway,
-  apiCancelGiveaway,
+  apiContactGiveawayWinner,
 } from '../utils/giveaways';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
@@ -274,33 +274,32 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
     }
   };
 
-  // End Giveaway Early
+  // End Drop Early (renamed from Cancel)
   const handleEndGiveaway = async (gw: GiveawayItem) => {
-    if (!window.confirm(`End giveaway "${gw.title}" early? Entrants pool will be frozen.`)) {
+    if (!window.confirm(`End drop "${gw.title}"? Status will become ENDED, but the winner and records will remain preserved.`)) {
       return;
     }
     const res = await apiEndGiveaway(gw.id);
     if (res.success) {
       playClickSound();
-      onShowToast?.('Giveaway concluded. You may now draw the winner.', 'info');
+      onShowToast?.('Drop concluded.', 'info');
       loadHostedGiveaways();
     } else {
-      onShowToast?.(res.error || 'Failed to end giveaway.', 'error');
+      onShowToast?.(res.error || 'Failed to end drop.', 'error');
     }
   };
 
-  // Cancel Giveaway
-  const handleCancelGiveaway = async (gw: GiveawayItem) => {
-    if (!window.confirm(`Are you sure you want to cancel "${gw.title}"?`)) {
-      return;
-    }
-    const res = await apiCancelGiveaway(gw.id);
+  // Contact Winner (Host <-> Winner Chat)
+  const handleContactWinner = async (gw: GiveawayItem) => {
+    const res = await apiContactGiveawayWinner(gw.id);
     if (res.success) {
-      playClickSound();
-      onShowToast?.('Giveaway cancelled.', 'info');
-      loadHostedGiveaways();
+      playSuccessSound();
+      onShowToast?.(res.message || 'Winner chat session established!', 'success');
+      if (onNavigateToTab) {
+        onNavigateToTab('live-trades');
+      }
     } else {
-      onShowToast?.(res.error || 'Failed to cancel giveaway.', 'error');
+      onShowToast?.(res.error || 'Failed to contact winner.', 'error');
     }
   };
 
@@ -1054,17 +1053,18 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {gw.status === 'ACTIVE' && (
+                        {(gw.winnerUsername || gw.winnerId) && (
                           <button
                             type="button"
-                            onClick={() => handleEndGiveaway(gw)}
-                            className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-game uppercase transition-colors"
+                            onClick={() => handleContactWinner(gw)}
+                            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-game font-black text-xs uppercase tracking-wider shadow-md flex items-center gap-1"
                           >
-                            End Drop
+                            <span className="material-symbols-outlined text-xs">chat</span>
+                            <span>Contact Winner</span>
                           </button>
                         )}
 
-                        {gw.status !== 'COMPLETED' && gw.status !== 'CANCELLED' && (
+                        {gw.status !== 'COMPLETED' && !gw.winnerId && (
                           <button
                             type="button"
                             onClick={() => handleDrawWinner(gw)}
@@ -1074,13 +1074,13 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
                           </button>
                         )}
 
-                        {gw.status !== 'COMPLETED' && gw.status !== 'CANCELLED' && (
+                        {gw.status !== 'ENDED' && gw.status !== 'CANCELLED' && (
                           <button
                             type="button"
-                            onClick={() => handleCancelGiveaway(gw)}
-                            className="px-3 py-1.5 rounded-xl text-rose-400 hover:bg-rose-950/40 text-xs font-game uppercase transition-colors"
+                            onClick={() => handleEndGiveaway(gw)}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-game uppercase transition-colors"
                           >
-                            Cancel
+                            End Drop
                           </button>
                         )}
                       </div>
