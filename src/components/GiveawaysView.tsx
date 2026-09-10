@@ -8,6 +8,7 @@ import {
   apiDrawGiveawayWinner,
   apiEndGiveaway,
   apiContactGiveawayWinner,
+  apiMarkPrizeClaimed,
 } from '../utils/giveaways';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
@@ -17,6 +18,7 @@ import { AdSlot } from './ads/AdSlot';
 import { FruitImage } from './FruitImage';
 import { ParticipantsModal } from './ParticipantsModal';
 import { DropEntryModal } from './DropEntryModal';
+import { WinnerRevealModal } from './WinnerRevealModal';
 
 interface GiveawaysViewProps {
   currentUser: AuthUser | null;
@@ -45,6 +47,13 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
   // Participants modal state
   const [selectedGwForModal, setSelectedGwForModal] = useState<GiveawayItem | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
+
+  // Winner reveal modal state
+  const [revealModal, setRevealModal] = useState<{
+    winner: { user_id: string; username: string; display_name?: string; avatar_url?: string };
+    gw: GiveawayItem;
+    alreadyDrawn: boolean;
+  } | null>(null);
 
   const loadGiveaways = async () => {
     setLoading(true);
@@ -149,12 +158,7 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
   // Draw Winner (for Hosts / Admins)
   const handleDrawWinner = async (gw: GiveawayItem) => {
-    if (gw.winnerId || gw.winnerUsername) {
-      onShowToast(`Winner already drawn: @${gw.winnerUsername}!`, 'info');
-      return;
-    }
-
-    if (!window.confirm(`Draw winner for "${gw.title}" now using provably fair RNG?`)) {
+    if (!window.confirm(`Draw winner for "${gw.title}" now using provably fair weighted RNG?`)) {
       return;
     }
     setActionInProgress(gw.id);
@@ -162,11 +166,32 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
     setActionInProgress(null);
 
     if (res.success && res.winner) {
-      playCoinSound();
-      onShowToast(`🏆 Winner drawn: @${res.winner.username || res.winner.display_name}!`, 'success');
+      if (res.alreadyDrawn) {
+        // Winner was already drawn — show reveal modal in "already drawn" mode
+        playCoinSound();
+        setRevealModal({ winner: res.winner, gw: res.giveaway || gw, alreadyDrawn: true });
+      } else {
+        // Fresh draw — show cinematic reveal
+        playCoinSound();
+        setRevealModal({ winner: res.winner, gw: res.giveaway || gw, alreadyDrawn: false });
+      }
       loadGiveaways();
     } else {
       onShowToast(res.error || 'Failed to draw winner.', 'error');
+    }
+  };
+
+  // Mark Prize Claimed (Host only)
+  const handleMarkPrizeClaimed = async (gw: GiveawayItem) => {
+    setActionInProgress(gw.id);
+    const res = await apiMarkPrizeClaimed(gw.id);
+    setActionInProgress(null);
+    if (res.success) {
+      playSuccessSound();
+      onShowToast('✅ Prize marked as claimed!', 'success');
+      loadGiveaways();
+    } else {
+      onShowToast(res.error || 'Failed to mark prize claimed.', 'error');
     }
   };
 
@@ -326,12 +351,13 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {giveaways.map((gw) => {
             const isJoined = gw.hasJoined ?? false;
+            const isClaimed = gw.status === 'PRIZE_CLAIMED';
+            const isDrawn = !!gw.winnerId || !!gw.winnerUsername || gw.status === 'COMPLETED' || isClaimed;
             const isEnded =
-              gw.status === 'ENDED' || gw.status === 'CANCELLED' || gw.status === 'COMPLETED';
-            const isDrawn = !!gw.winnerId || !!gw.winnerUsername || gw.status === 'COMPLETED';
+              gw.status === 'ENDED' || gw.status === 'CANCELLED';
 
             const isHost = currentUser && currentUser.id === gw.hostId;
-            const isWinner = currentUser && gw.winnerId && currentUser.id === gw.winnerId;
+            const isWinner = !!(currentUser && gw.winnerId && currentUser.id === gw.winnerId);
             const isHostOrAdmin =
               currentUser &&
               (isHost ||
@@ -339,10 +365,14 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                 currentUser.role === 'ADMIN' ||
                 currentUser.role === 'MODERATOR');
 
+            // Prize claimed button visible: host/admin after winner drawn, status not yet PRIZE_CLAIMED
+            const canMarkClaimed = !!isHostOrAdmin && isDrawn && !isClaimed && !isEnded;
+
             const prizeTotal = (gw.prizes || []).reduce(
               (sum, p) => sum + (p?.marketValue || p?.value || 0) * (p?.quantity || 1),
               0
             );
+
 
             return (
               <div
@@ -382,14 +412,16 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
                       <span
                         className={`text-[9px] font-game font-bold uppercase px-2.5 py-0.5 rounded-full border ${
-                          isDrawn
+                          isClaimed
+                            ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+                            : isDrawn
                             ? 'bg-amber-950/80 border-amber-500/50 text-amber-300'
                             : isEnded
                             ? 'bg-slate-900 border-slate-700 text-slate-400'
                             : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 animate-pulse'
                         }`}
                       >
-                        {isDrawn ? 'DRAWN' : isEnded ? 'ENDED' : 'LIVE'}
+                        {isClaimed ? 'CLAIMED' : isDrawn ? 'DRAWN' : isEnded ? 'ENDED' : 'LIVE'}
                       </span>
                     </div>
                   </div>
@@ -452,27 +484,47 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
 
                   {/* Winner Announcement Banner (Permanently Displayed After Draw) */}
                   {(gw.winnerUsername || gw.winnerId) && (
-                    <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/90 via-amber-950/80 to-purple-950/90 border border-amber-500/50 mb-3 shadow-lg flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-                          <span className="material-symbols-outlined text-base">emoji_events</span>
-                        </div>
-                        <div>
-                          <div className="text-[10px] font-game font-bold text-amber-400 uppercase tracking-wider">
-                            🏆 WINNER SELECTED
+                    <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/90 via-amber-950/80 to-purple-950/90 border border-amber-500/50 mb-3 shadow-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                            <span className="material-symbols-outlined text-base">emoji_events</span>
                           </div>
-                          <div className="text-xs font-game font-bold text-white">
-                            @{gw.winnerUsername || 'winner'}
+                          <div>
+                            <div className="text-[10px] font-game font-bold text-amber-400 uppercase tracking-wider">
+                              🏆 {isClaimed ? 'PRIZE CLAIMED' : 'WINNER SELECTED'}
+                            </div>
+                            <div className="text-xs font-game font-bold text-white">
+                              @{gw.winnerUsername || 'winner'}
+                            </div>
                           </div>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => onViewTraderProfile(gw.winnerUsername || 'winner')}
+                          className="text-[11px] font-mono font-bold text-amber-400 hover:underline"
+                        >
+                          Profile &rarr;
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onViewTraderProfile(gw.winnerUsername || 'winner')}
-                        className="text-[11px] font-mono font-bold text-amber-400 hover:underline"
-                      >
-                        Profile &rarr;
-                      </button>
+
+                      {/* YOU WON banner — only visible to the winner */}
+                      {isWinner && (
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-500/20">
+                          <span className="text-[11px] font-game font-black text-amber-300 uppercase tracking-widest animate-pulse">
+                            🎉 YOU WON!
+                          </span>
+                          <button
+                            type="button"
+                            disabled={actionInProgress === gw.id}
+                            onClick={() => handleContactWinner(gw)}
+                            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-game font-bold text-[10px] uppercase flex items-center gap-1 transition-all"
+                          >
+                            <span className="material-symbols-outlined text-xs">chat</span>
+                            Message Host
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -505,8 +557,8 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                       </button>
                     )}
 
-                    {/* Host/Winner Action: Contact Winner */}
-                    {isDrawn && (isHost || isWinner || isHostOrAdmin) && (
+                    {/* Host/Winner Action: Contact Winner (footer shortcut for hosts) */}
+                    {isDrawn && isHostOrAdmin && (
                       <button
                         type="button"
                         disabled={actionInProgress === gw.id}
@@ -514,12 +566,25 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
                         className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-game font-black text-[11px] uppercase tracking-wider shadow-md flex items-center gap-1"
                       >
                         <span className="material-symbols-outlined text-xs">chat</span>
-                        <span>Contact Winner</span>
+                        <span>Contact</span>
                       </button>
                     )}
 
-                    {/* Host Action: End Drop (Replaces old Cancel) */}
-                    {isHostOrAdmin && !isEnded && (
+                    {/* Host Action: Mark Prize Claimed */}
+                    {canMarkClaimed && (
+                      <button
+                        type="button"
+                        disabled={actionInProgress === gw.id}
+                        onClick={() => handleMarkPrizeClaimed(gw)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-700/30 hover:bg-emerald-700/50 border border-emerald-500/40 text-emerald-300 font-game font-bold text-[11px] uppercase flex items-center gap-1 transition-all"
+                      >
+                        <span className="material-symbols-outlined text-xs">check_circle</span>
+                        <span>Claimed</span>
+                      </button>
+                    )}
+
+                    {/* Host Action: End Drop */}
+                    {isHostOrAdmin && !isEnded && !isClaimed && (
                       <button
                         type="button"
                         disabled={actionInProgress === gw.id}
@@ -576,6 +641,19 @@ export const GiveawaysView: React.FC<GiveawaysViewProps> = ({
           isOpen={isParticipantsModalOpen}
           onClose={() => setIsParticipantsModalOpen(false)}
           onViewTraderProfile={onViewTraderProfile}
+        />
+      )}
+
+      {/* Winner Reveal Modal — cinematic 3→2→1→🏆 reveal */}
+      {revealModal && (
+        <WinnerRevealModal
+          winner={revealModal.winner}
+          giveawayTitle={revealModal.gw.title}
+          isHost={!!(currentUser && currentUser.id === revealModal.gw.hostId)}
+          alreadyDrawn={revealModal.alreadyDrawn}
+          onContactWinner={() => handleContactWinner(revealModal.gw)}
+          onMarkPrizeClaimed={() => handleMarkPrizeClaimed(revealModal.gw)}
+          onClose={() => setRevealModal(null)}
         />
       )}
     </div>

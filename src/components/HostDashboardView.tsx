@@ -7,12 +7,14 @@ import {
   apiDrawGiveawayWinner,
   apiEndGiveaway,
   apiContactGiveawayWinner,
+  apiMarkPrizeClaimed,
 } from '../utils/giveaways';
 import { formatMoney } from '../utils/calc';
 import { playClickSound, playSuccessSound, playCoinSound } from '../utils/audio';
 import { canHostGiveaways } from '../utils/permissions';
 import { FruitImage } from './FruitImage';
 import { ParticipantsModal } from './ParticipantsModal';
+import { WinnerRevealModal } from './WinnerRevealModal';
 
 export interface HostDashboardViewProps {
   currentUser: AuthUser | null;
@@ -68,6 +70,14 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedManageGw, setSelectedManageGw] = useState<GiveawayItem | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
+
+  // Winner reveal modal state
+  const [revealModal, setRevealModal] = useState<{
+    winner: { user_id: string; username: string; display_name?: string; avatar_url?: string };
+    gw: GiveawayItem;
+    alreadyDrawn: boolean;
+  } | null>(null);
+
 
   const isAuthorized =
     currentUser &&
@@ -264,10 +274,7 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
     const res = await apiDrawGiveawayWinner(gw.id);
     if (res.success && res.winner) {
       playCoinSound();
-      onShowToast?.(
-        `🏆 Winner drawn: @${res.winner.username}${res.winner.hasYoutubeBoost ? ' (with YouTube Boost!)' : ''}`,
-        'success'
-      );
+      setRevealModal({ winner: res.winner, gw: res.giveaway || gw, alreadyDrawn: !!res.alreadyDrawn });
       loadHostedGiveaways();
     } else {
       onShowToast?.(res.error || 'Failed to draw winner.', 'error');
@@ -289,6 +296,18 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
     }
   };
 
+  // Mark Prize Claimed
+  const handleMarkPrizeClaimed = async (gw: GiveawayItem) => {
+    const res = await apiMarkPrizeClaimed(gw.id);
+    if (res.success) {
+      playSuccessSound();
+      onShowToast?.('✅ Prize marked as claimed!', 'success');
+      loadHostedGiveaways();
+    } else {
+      onShowToast?.(res.error || 'Failed to mark prize claimed.', 'error');
+    }
+  };
+
   // Contact Winner (Host <-> Winner Chat)
   const handleContactWinner = async (gw: GiveawayItem) => {
     const res = await apiContactGiveawayWinner(gw.id);
@@ -302,6 +321,7 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
       onShowToast?.(res.error || 'Failed to contact winner.', 'error');
     }
   };
+
 
   if (!currentUser) {
     return (
@@ -1053,6 +1073,7 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {/* Contact Winner */}
                         {(gw.winnerUsername || gw.winnerId) && (
                           <button
                             type="button"
@@ -1064,7 +1085,8 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
                           </button>
                         )}
 
-                        {gw.status !== 'COMPLETED' && !gw.winnerId && (
+                        {/* Draw Winner — only if no winner yet */}
+                        {!gw.winnerId && gw.status !== 'ENDED' && gw.status !== 'CANCELLED' && (
                           <button
                             type="button"
                             onClick={() => handleDrawWinner(gw)}
@@ -1074,7 +1096,20 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
                           </button>
                         )}
 
-                        {gw.status !== 'ENDED' && gw.status !== 'CANCELLED' && (
+                        {/* Mark Prize Claimed — after winner drawn, before claimed */}
+                        {gw.winnerId && gw.status !== 'PRIZE_CLAIMED' && gw.status !== 'ENDED' && gw.status !== 'CANCELLED' && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkPrizeClaimed(gw)}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-700/30 hover:bg-emerald-700/50 border border-emerald-500/40 text-emerald-300 font-game font-bold text-xs uppercase flex items-center gap-1 transition-all"
+                          >
+                            <span className="material-symbols-outlined text-xs">check_circle</span>
+                            Mark Claimed
+                          </button>
+                        )}
+
+                        {/* End Drop */}
+                        {gw.status !== 'ENDED' && gw.status !== 'CANCELLED' && gw.status !== 'PRIZE_CLAIMED' && (
                           <button
                             type="button"
                             onClick={() => handleEndGiveaway(gw)}
@@ -1100,6 +1135,19 @@ export const HostDashboardView: React.FC<HostDashboardViewProps> = ({
           isOpen={isParticipantsModalOpen}
           onClose={() => setIsParticipantsModalOpen(false)}
           onViewTraderProfile={onViewTraderProfile || (() => {})}
+        />
+      )}
+
+      {/* Winner Reveal Modal — cinematic 3→2→1→🏆 reveal */}
+      {revealModal && (
+        <WinnerRevealModal
+          winner={revealModal.winner}
+          giveawayTitle={revealModal.gw.title}
+          isHost={true}
+          alreadyDrawn={revealModal.alreadyDrawn}
+          onContactWinner={() => handleContactWinner(revealModal.gw)}
+          onMarkPrizeClaimed={() => handleMarkPrizeClaimed(revealModal.gw)}
+          onClose={() => setRevealModal(null)}
         />
       )}
     </div>

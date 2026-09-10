@@ -774,25 +774,89 @@ export const apiVerifyGiveawayCode = apiRedeemGiveawayBoost;
 
 export async function apiDrawGiveawayWinner(
   giveawayId: string
-): Promise<{ success: boolean; message?: string; winner?: any; giveaway?: GiveawayItem; error?: string }> {
-  // 1. Check if a winner has already been drawn to prevent rerolling
-  const currentRes = await apiGetGiveaway(giveawayId);
-  if (currentRes.giveaway?.winnerId) {
-    return {
-      success: true,
-      message: `Winner already drawn: @${currentRes.giveaway.winnerUsername || 'winner'}`,
-      winner: {
-        user_id: currentRes.giveaway.winnerId,
-        username: currentRes.giveaway.winnerUsername,
-        display_name: currentRes.giveaway.winnerDisplayName,
-        avatar_url: currentRes.giveaway.winnerAvatar,
-      },
-      giveaway: currentRes.giveaway,
-    };
+): Promise<{ success: boolean; message?: string; winner?: any; giveaway?: GiveawayItem; alreadyDrawn?: boolean; error?: string }> {
+  // ── ATTEMPT 1: Server-authoritative Supabase RPC ─────────────────────────
+  // Atomic, idempotent, weighted random — selected by the DB server, not JS.
+  // Falls back to client-side draw only if RPC is not yet deployed.
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('draw_giveaway_winner', {
+      p_giveaway_id: giveawayId,
+    });
+
+    if (!rpcErr && rpcData) {
+      const result = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+
+      if (!result.success) {
+        return { success: false, error: result.error || 'Failed to draw winner.' };
+      }
+
+      const winner = {
+        user_id: result.winner_id,
+        username: result.username || 'winner',
+        display_name: result.display_name || result.username || 'winner',
+        avatar_url: result.avatar_url || 'person',
+      };
+
+      localGiveawaysCache = localGiveawaysCache.map((g) =>
+        g.id === giveawayId
+          ? {
+              ...g,
+              status: 'COMPLETED' as GiveawayStatus,
+              winnerId: result.winner_id,
+              winnerUsername: winner.username,
+              winnerDisplayName: winner.display_name,
+              winnerAvatar: winner.avatar_url,
+            }
+          : g
+      );
+      saveStoredLocalGiveaways(localGiveawaysCache);
+
+      const gwRes = await apiGetGiveaway(giveawayId);
+
+      if (result.already_drawn) {
+        return {
+          success: true,
+          alreadyDrawn: true,
+          message: `Winner already drawn: @${winner.username}`,
+          winner,
+          giveaway: gwRes.giveaway,
+        };
+      }
+
+      return {
+        success: true,
+        alreadyDrawn: false,
+        message: `🏆 Winner drawn: @${winner.username}!`,
+        winner,
+        giveaway: gwRes.giveaway,
+      };
+    }
+
+    // RPC returned an error — fall through to client-side fallback
+    console.warn('[GIVEAWAYS] RPC draw_giveaway_winner unavailable, using client fallback:', rpcErr?.message);
+  } catch (rpcException) {
+    console.warn('[GIVEAWAYS] RPC draw_giveaway_winner exception, using client fallback:', rpcException);
   }
 
+  // ── ATTEMPT 2: Client-side weighted draw (fallback only) ─────────────────
   try {
-    // 2. Fetch real entries for this specific giveaway
+    // Idempotency guard
+    const currentRes = await apiGetGiveaway(giveawayId);
+    if (currentRes.giveaway?.winnerId) {
+      return {
+        success: true,
+        alreadyDrawn: true,
+        message: `Winner already drawn: @${currentRes.giveaway.winnerUsername || 'winner'}`,
+        winner: {
+          user_id: currentRes.giveaway.winnerId,
+          username: currentRes.giveaway.winnerUsername,
+          display_name: currentRes.giveaway.winnerDisplayName,
+          avatar_url: currentRes.giveaway.winnerAvatar,
+        },
+        giveaway: currentRes.giveaway,
+      };
+    }
+
     const { data: entries } = await supabase
       .from('giveaway_entries')
       .select('*')
@@ -802,44 +866,35 @@ export async function apiDrawGiveawayWinner(
       return { success: false, error: 'No eligible entrants yet.' };
     }
 
-    // 3. Perform weighted RNG selection (boosted entries receive higher weight)
     const totalWeight = entries.reduce((sum, e) => sum + (e.weight || (e.is_boosted ? 1.1 : 1.0)), 0);
     let randomNum = Math.random() * totalWeight;
     let selectedWinner = entries[0];
-
     for (const entry of entries) {
       const entryWeight = entry.weight || (entry.is_boosted ? 1.1 : 1.0);
-      if (randomNum <= entryWeight) {
-        selectedWinner = entry;
-        break;
-      }
+      if (randomNum <= entryWeight) { selectedWinner = entry; break; }
       randomNum -= entryWeight;
     }
 
-    // 4. Resolve winner profile from profiles table
     let winnerProfile: { username: string; displayName: string; avatarUrl: string } | null = null;
     if (selectedWinner.user_id) {
-      try {
-        const { data: p } = await supabase
-          .from('profiles')
-          .select('username, display_name, avatar_url')
-          .eq('id', selectedWinner.user_id)
-          .maybeSingle();
-        if (p) {
-          winnerProfile = {
-            username: p.username || 'member',
-            displayName: p.display_name || p.username || 'member',
-            avatarUrl: p.avatar_url || 'person',
-          };
-        }
-      } catch {}
+      const { data: p } = await supabase
+        .from('profiles')
+        .select('username, display_name, avatar_url')
+        .eq('id', selectedWinner.user_id)
+        .maybeSingle();
+      if (p) {
+        winnerProfile = {
+          username: p.username || 'member',
+          displayName: p.display_name || p.username || 'member',
+          avatarUrl: p.avatar_url || 'person',
+        };
+      }
     }
 
     const resolvedWinnerUsername = winnerProfile?.username || 'member';
     const resolvedWinnerDisplayName = winnerProfile?.displayName || resolvedWinnerUsername;
     const resolvedWinnerAvatar = winnerProfile?.avatarUrl || 'person';
 
-    // 5. Persist winner permanently in database
     await supabase
       .from('giveaways')
       .update({
@@ -849,6 +904,7 @@ export async function apiDrawGiveawayWinner(
         winner_avatar: resolvedWinnerAvatar,
         status: 'COMPLETED',
         completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .eq('id', giveawayId);
 
@@ -869,6 +925,7 @@ export async function apiDrawGiveawayWinner(
     const gwRes = await apiGetGiveaway(giveawayId);
     return {
       success: true,
+      alreadyDrawn: false,
       message: `🏆 Winner drawn: @${resolvedWinnerUsername}!`,
       winner: {
         user_id: selectedWinner.user_id,
@@ -879,9 +936,31 @@ export async function apiDrawGiveawayWinner(
       giveaway: gwRes.giveaway,
     };
   } catch (err: any) {
-    console.error('[GIVEAWAYS] apiDrawGiveawayWinner error:', err);
+    console.error('[GIVEAWAYS] apiDrawGiveawayWinner fallback error:', err);
     return { success: false, error: err?.message || 'Failed to draw winner.' };
   }
+}
+
+export async function apiMarkPrizeClaimed(
+  giveawayId: string
+): Promise<{ success: boolean; message?: string; giveaway?: GiveawayItem; error?: string }> {
+  // Update local cache optimistically
+  localGiveawaysCache = localGiveawaysCache.map((g) =>
+    g.id === giveawayId ? { ...g, status: 'PRIZE_CLAIMED' as GiveawayStatus } : g
+  );
+  saveStoredLocalGiveaways(localGiveawaysCache);
+
+  try {
+    await supabase
+      .from('giveaways')
+      .update({ status: 'PRIZE_CLAIMED', updated_at: new Date().toISOString() })
+      .eq('id', giveawayId);
+  } catch (err) {
+    console.warn('[GIVEAWAYS] apiMarkPrizeClaimed DB update error:', err);
+  }
+
+  const gwRes = await apiGetGiveaway(giveawayId);
+  return { success: true, message: 'Prize marked as claimed!', giveaway: gwRes.giveaway };
 }
 
 export async function apiEndGiveaway(

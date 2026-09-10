@@ -396,7 +396,8 @@ export type GiveawayStatus =
   | 'ENDED'
   | 'DRAWING'
   | 'COMPLETED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'PRIZE_CLAIMED';
 
 export interface GiveawayPrize {
   id: string;
